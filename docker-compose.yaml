@@ -1,0 +1,76 @@
+services:
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama
+    pull_policy: always
+    tty: true
+    restart: unless-stopped
+    # 默认使用官方 Ollama 镜像。对于 GPU 支持，请取消注释下面的相应行，并注释掉默认的 image 指令。
+    # 确保你的主机已正确安装 NVIDIA 驱动并配置 Docker 以使用 GPU。
+    # 更多关于 Ollama GPU 支持和可用标签的信息，请参考 Ollama 官方文档。
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest} # 默认 CPU 版本或根据 Ollama 官方 `latest` 标签的行为
+    # image: ollama/ollama:0.1.41 # 指定一个具体的 CPU 版本 (版本号仅为示例)
+    # image: ollama/ollama:0.1.41-cuda # 示例：NVIDIA CUDA GPU 支持 (请替换为最新的或期望的 CUDA 版本标签)
+    # image: ollama/ollama:0.1.41-rocm # 示例：AMD ROCm GPU 支持 (请替换为最新的或期望的 ROCm 版本标签)
+
+  open-webui:
+    build:
+      context: .
+      args:
+        OLLAMA_BASE_URL: '/ollama'
+      dockerfile: Dockerfile
+    # 默认使用本项目构建的标准 Open WebUI 镜像 (cnqsxdy/openwebui)。
+    # 它包含了特定的二次开发功能。
+    #
+    # 如需使用其他由 CI 构建的特定变体，请参考以下示例：
+    # (取消注释相应的 image 行，并注释掉上面默认的 image 行)
+    #
+    # 注意事项：
+    # 1. `${WEBUI_DOCKER_TAG-...}` 允许通过环境变量覆盖默认标签。
+    # 2. 对于 'cuda' 变体：这指的是 Open WebUI 应用本身对 PyTorch 的 CUDA 支持。
+    #    你仍然需要一个独立的、支持 GPU 的 Ollama 服务 (见上面的 ollama 服务配置) 来运行实际的模型。
+    # 3. 对于 'ollama' 捆绑变体：此镜像内置了 Ollama 服务。可能不包含最新的 Ollama 功能。
+    #    如果使用此变体，你可能不需要上面的独立 'ollama' 服务，或者需要调整配置以避免冲突。
+    image: cnqsxdy/openwebui:${WEBUI_DOCKER_TAG-latest} # 标准版本 (推荐，使用外部 Ollama 服务)
+    # image: cnqsxdy/openwebui:${WEBUI_DOCKER_TAG_CUDA-latest-cuda} # CUDA 版 PyTorch (配合外部 GPU Ollama 服务)
+    # image: cnqsxdy/openwebui:${WEBUI_DOCKER_TAG_OLLAMA-latest-ollama} # Ollama 捆绑版 (实验性)
+    container_name: open-webui
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    ports:
+      - ${OPEN_WEBUI_PORT-3000}:8080
+    environment:
+      - 'OLLAMA_BASE_URL=http://ollama:11434'
+      - 'WEBUI_SECRET_KEY='
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+# mysql:
+#   image: mysql:8
+#   environment:
+#     MYSQL_ROOT_PASSWORD: password
+#     MYSQL_DATABASE: dbname
+#     MYSQL_USER: user
+#     MYSQL_PASSWORD: password
+#   volumes:
+#     - mysql_data:/var/lib/mysql
+#   ports:
+#     - "3306:3306"
+
+# redis:
+#   image: redis:7
+#   command: ["redis-server", "--requirepass", "password"]
+#   ports:
+#     - "6379:6379"
+#   volumes:
+#     - redis_data:/data
+
+volumes:
+  ollama: {}
+  open-webui: {}
+  # mysql_data:
+  # redis_data:
