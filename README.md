@@ -92,7 +92,7 @@ docker run -d \
   ghcr.io/cnqsxdy/openwebui:<版本号>
 ```
 
-### 使用 MySQL 和 Redis
+### 使用 MySQL（暂未支持！需后续兼容迁移脚本） 和 Redis
 
 可以通过环境变量配置连接 MySQL 和 Redis。请根据你的实际情况修改连接字符串和密码:
 
@@ -118,7 +118,7 @@ docker run -d \
 docker compose up -d
 ```
 
-### 使用 MySQL 和 Redis
+### 使用 MySQL（暂未支持！需后续兼容迁移脚本） 和 Redis
 
 修改 `docker-compose.yaml` 文件，取消 `mysql` 和 `redis` 服务的注释，并根据你的需求配置环境变量。然后执行：
 
@@ -132,13 +132,13 @@ docker compose up -d
 
 - `open-webui`: 主 WebUI 服务。
 - `ollama`: 大模型服务。
-- `mysql` (可选): MySQL 数据库服务，需取消注释并配置。
+- `mysql` （暂未支持！需后续兼容迁移脚本）: MySQL 数据库服务，需取消注释并配置。
 - `redis` (可选): Redis 服务，用于高级功能（如积分、邮箱验证），需取消注释并配置。
 
 ### 环境变量说明
 
 - `WEBUI_SECRET_KEY`: WebUI 密钥，**必须设置为强密码**。
-- `DATABASE_URL`: 数据库连接字符串，默认使用 SQLite (`sqlite:///app/backend/data/webui.db`)。如使用 MySQL，请修改为 `mysql+pymysql://user:password@mysql:3306/dbname` (如果MySQL服务也在同一个docker-compose网络中) 或 `mysql+pymysql://user:password@your_mysql_host:3306/dbname` (如果MySQL在外部)。
+- `DATABASE_URL`: 数据库连接字符串，默认使用 SQLite (`sqlite:///app/backend/data/webui.db`)。如使用 MySQL（暂未支持！需后续兼容迁移脚本），请修改为 `mysql+pymysql://user:password@mysql:3306/dbname` (如果MySQL服务也在同一个docker-compose网络中) 或 `mysql+pymysql://user:password@your_mysql_host:3306/dbname` (如果MySQL在外部)。
 - `REDIS_URL`: Redis 连接字符串，启用积分/邮箱验证等功能时需配置。如使用 Redis 服务在同一个docker-compose网络中，请修改为 `redis://:password@redis:6379/0`。如Redis在外部，请修改为 `redis://:password@your_redis_host:6379/0`。
 
 ### 数据持久化

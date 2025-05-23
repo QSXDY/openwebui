@@ -163,7 +163,9 @@ class PlansTable:
                 db.commit()
                 db.refresh(plan)
                 # 先将 SQLAlchemy 对象转换为字典
-                plan_dict = {c.name: getattr(plan, c.name) for c in plan.__table__.columns}
+                plan_dict = {
+                    c.name: getattr(plan, c.name) for c in plan.__table__.columns
+                }
                 return PlanModel.model_validate(plan_dict)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -175,7 +177,9 @@ class PlansTable:
                 if not plan:
                     return None
                 # 先将 SQLAlchemy 对象转换为字典
-                plan_dict = {c.name: getattr(plan, c.name) for c in plan.__table__.columns}
+                plan_dict = {
+                    c.name: getattr(plan, c.name) for c in plan.__table__.columns
+                }
                 return PlanModel.model_validate(plan_dict)
         except Exception:
             return None
@@ -185,7 +189,12 @@ class PlansTable:
             with get_db() as db:
                 plans = db.query(Plan).filter(Plan.is_active == True).all()
                 # 转换每个 SQLAlchemy 对象为字典
-                return [PlanModel.model_validate({c.name: getattr(plan, c.name) for c in plan.__table__.columns}) for plan in plans]
+                return [
+                    PlanModel.model_validate(
+                        {c.name: getattr(plan, c.name) for c in plan.__table__.columns}
+                    )
+                    for plan in plans
+                ]
         except Exception:
             return []
 
@@ -297,8 +306,13 @@ class SubscriptionsTable:
                     free_plan = db.query(Plan).filter(Plan.id == "free").first()
                     free_plan_dict = None
                     if free_plan:
-                        free_plan_dict = {c.name: getattr(free_plan, c.name) for c in free_plan.__table__.columns}
-                        free_plan_dict = PlanModel.model_validate(free_plan_dict).model_dump()
+                        free_plan_dict = {
+                            c.name: getattr(free_plan, c.name)
+                            for c in free_plan.__table__.columns
+                        }
+                        free_plan_dict = PlanModel.model_validate(
+                            free_plan_dict
+                        ).model_dump()
                     return {
                         "success": True,
                         "subscription": {
@@ -309,12 +323,14 @@ class SubscriptionsTable:
                             "is_subscribed": False,
                         },
                     }
-                
+
                 # 获取套餐详情
                 plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
                 plan_dict = None
                 if plan:
-                    plan_dict = {c.name: getattr(plan, c.name) for c in plan.__table__.columns}
+                    plan_dict = {
+                        c.name: getattr(plan, c.name) for c in plan.__table__.columns
+                    }
                     plan_dict = PlanModel.model_validate(plan_dict).model_dump()
 
                 return {
@@ -514,7 +530,7 @@ class PaymentsTable:
                 # 确保有ID
                 if "id" not in payment_data:
                     payment_data["id"] = str(uuid.uuid4())
-                
+
                 # 创建支付记录
                 payment = Payment(**payment_data)
                 db.add(payment)
@@ -523,15 +539,17 @@ class PaymentsTable:
                 return PaymentModel.model_validate(payment)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-    
-    def update_payment(self, payment_id: str, payment_data: PaymentModel) -> Optional[PaymentModel]:
+
+    def update_payment(
+        self, payment_id: str, payment_data: PaymentModel
+    ) -> Optional[PaymentModel]:
         """更新支付记录"""
         try:
             with get_db() as db:
                 # 更新支付记录
                 db.query(Payment).filter(Payment.id == payment_id).update(
                     payment_data.model_dump(exclude_unset=True),
-                    synchronize_session=False
+                    synchronize_session=False,
                 )
                 db.commit()
                 # 返回更新后的记录
@@ -539,7 +557,7 @@ class PaymentsTable:
                 return PaymentModel.model_validate(payment) if payment else None
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-            
+
     def get_payment(self, payment_id: str) -> Optional[PaymentModel]:
         """获取支付记录"""
         try:

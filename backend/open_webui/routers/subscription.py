@@ -56,7 +56,7 @@ async def create_plan(
         # 如果没有提供ID，生成一个
         if not plan_data.id:
             plan_data.id = str(uuid.uuid4())[:8]
-            
+
         # 确保传入的是PlanModel实例
         plan = Plans.create_plan(plan_data)
         return {"success": True, "plan": plan.model_dump()}
@@ -112,19 +112,16 @@ async def delete_plan(plan_id: str = Path(...), _: UserModel = Depends(get_admin
 
 @router.get("/users/{user_id}/subscription", summary="获取用户订阅详情")
 async def get_user_subscription(
-    user_id: str,
-    user: UserModel = Depends(get_current_user)
+    user_id: str, user: UserModel = Depends(get_current_user)
 ):
     """获取用户当前订阅状态"""
     # 检查权限（只能查看自己的订阅或管理员可查看所有）
     if user_id != user.id and user.role != "admin":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权查看他人订阅信息"
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人订阅信息"
         )
-        
-    return Subscriptions.get_user_subscription(user_id)
 
+    return Subscriptions.get_user_subscription(user_id)
 
 
 @router.post(
@@ -311,6 +308,7 @@ async def get_payment_detail(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取失败: {str(e)}",
         )
+
 
 # 保留这个更详细的接口定义
 @router.get(
