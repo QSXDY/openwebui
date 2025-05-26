@@ -537,7 +537,7 @@
 	"exchangetext": "兑换码",
 	"exchangetext-code": "兑换码",
 	"exchangetext-count": "兑换码生成数量",
-"exchangetext-count-placeholder": "请输入兑换码生成数量",
+	"exchangetext-count-placeholder": "请输入兑换码生成数量",
 	"exchangetext-created_at": "创建时间",
 	"exchangetext-duration": "兑换码有效期(天)",
 	"exchangetext-duration-placeholder": "请输入兑换码有效期",

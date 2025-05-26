@@ -51,10 +51,10 @@
 	};
 	const onPayTypeChange = (type: string) => {
 		if (type === payType) {
-		return
-		}else{
-			payType=type
-			dinggou()
+			return;
+		} else {
+			payType = type;
+			dinggou();
 		}
 	};
 

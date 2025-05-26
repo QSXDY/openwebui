@@ -1,4 +1,4 @@
-(function() {
+(function () {
 	'use strict';
 	const MARKDOWN_IT_CDN = '/static/markdown-it.min.js';
 	const HIGHLIGHT_JS_CDN = '/static/highlight.min.js';
@@ -44,42 +44,29 @@
 					loadScript(HIGHLIGHT_LANG_RUST_CDN),
 					loadScript(HIGHLIGHT_LANG_TS_CDN),
 					loadScript(HIGHLIGHT_LANG_PYTHON_CDN)
-				]).catch((e) =>
-					console.warn('Could not load optional highlight.js languages:', e)
-				);
+				]).catch((e) => console.warn('Could not load optional highlight.js languages:', e));
 			}
 			md = window.markdownit({
 				html: true,
 				linkify: true,
 				typographer: true,
-				highlight: function(str, lang) {
+				highlight: function (str, lang) {
 					if (window.hljs) {
 						hljs = window.hljs;
 						if (lang && hljs.getLanguage(lang)) {
 							try {
 								return (
 									'<pre class="hljs"><code>' +
-									hljs.highlight(str, { language: lang, ignoreIllegals: true })
-										.value +
+									hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
 									'</code></pre>'
 								);
-							} catch (__) {
-							}
+							} catch (__) {}
 						}
 						try {
-							return (
-								'<pre class="hljs"><code>' +
-								hljs.highlightAuto(str).value +
-								'</code></pre>'
-							);
-						} catch (__) {
-						}
+							return '<pre class="hljs"><code>' + hljs.highlightAuto(str).value + '</code></pre>';
+						} catch (__) {}
 					}
-					return (
-						'<pre class="hljs"><code>' +
-						md.utils.escapeHtml(str) +
-						'</code></pre>'
-					);
+					return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>';
 				}
 			});
 			hljs = window.hljs;
@@ -170,9 +157,7 @@
 			const parentPlaceholder = mainChatInput.querySelector('p.is-empty');
 			if (parentPlaceholder) parentPlaceholder.classList.remove('is-empty');
 		}
-		mainChatInput.dispatchEvent(
-			new Event('input', { bubbles: true, cancelable: true })
-		);
+		mainChatInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
 		closeModal();
 		mainChatInput.focus();
 	}
@@ -205,10 +190,7 @@
 				openModal();
 			}
 		});
-		voiceButtonContainer.parentElement.insertBefore(
-			editButton,
-			voiceButtonContainer
-		);
+		voiceButtonContainer.parentElement.insertBefore(editButton, voiceButtonContainer);
 		console.log('Markdown Editor button injected.');
 	}
 

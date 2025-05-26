@@ -236,10 +236,6 @@
 				</div>
 			</div>
 
-	
-
-		
-
 			<div class="max-h-[14rem] flex flex-col items-center w-full">
 				<div id="trade-qrcode" class="max-h-[128px] max-w-[128px]"></div>
 				{#if tradeInfo?.detail?.imgDisplayUrl}

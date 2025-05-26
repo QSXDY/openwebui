@@ -184,15 +184,15 @@
 						<span class="mr-1">⟳</span>续费
 					</button>
 				{:else}
-				<!-- on:click={() => {
+					<!-- on:click={() => {
 					nihasd();
 				}} -->
 					<button
-					on:click={() => {
-						console.log('订购', menu);
-						frmoMenu = menu;
-						showDeleteConfirmDialog = true;
-					}}
+						on:click={() => {
+							console.log('订购', menu);
+							frmoMenu = menu;
+							showDeleteConfirmDialog = true;
+						}}
 						class="w-full bg-black text-white py-2 rounded font-bold flex items-center justify-center gap-2"
 					>
 						订阅

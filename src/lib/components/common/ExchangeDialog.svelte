@@ -104,7 +104,7 @@
 
 	$: if (menu) {
 		dinggou();
-		payType='alipay'
+		payType = 'alipay';
 	}
 
 	onDestroy(() => {

@@ -1,4 +1,4 @@
-(function() {
+(function () {
 	function checkIsEditPage() {
 		return window.location.href.includes('/functions');
 	}
@@ -22,7 +22,7 @@
 	}
 
 	const originalPushState = history.pushState;
-	history.pushState = function(state, title, url) {
+	history.pushState = function (state, title, url) {
 		originalPushState.apply(history, arguments);
 		onRouteChange();
 	};
@@ -83,7 +83,7 @@
 		if (hasNewCodeBlocks) requestAnimationFrame(initializeAllCodeBlocks);
 	});
 	let mutationObserverActive = false;
-	document.addEventListener('click', function(evt) {
+	document.addEventListener('click', function (evt) {
 		if (!evt.target.classList.contains('code-expand-btn')) return;
 		const editorRoot = evt.target.closest('.cm-editor');
 		if (!editorRoot) return;
