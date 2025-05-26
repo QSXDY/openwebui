@@ -17,7 +17,7 @@ from open_webui.models.credits import (
     CreditLogSimpleModel,
     CreditLogs,
 )
-from open_webui.utils.payment  import handle_payment_callback
+from open_webui.utils.payment import handle_payment_callback
 from open_webui.models.models import Models, ModelPriceForm
 from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import get_current_user, get_admin_user
@@ -94,7 +94,6 @@ async def create_ticket(
             ua=request.headers.get("User-Agent"),
         ),
     )
-
 
 
 @router.get("/callback", response_class=PlainTextResponse)
