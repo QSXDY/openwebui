@@ -851,7 +851,6 @@
 	"Model updated successfully": "模型更新成功",
 	"Modelfile Content": "模型文件内容",
 	"Models": "应用广场",
-
 	"Models Access": "访问模型列表",
 	"Models configuration saved successfully": "模型配置保存成功",
 	"Models Public Sharing": "模型公开分享",
@@ -978,6 +977,7 @@
 	"Please enter a valid path": "请输入有效路径",
 	"Please enter a valid URL": "请输入有效 URL",
 	"Please fill in all fields.": "请填写所有字段。",
+	"Please refresh after payment": "",
 	"Please select a model first.": "请先选择一个模型。",
 	"Please select a model.": "请选择一个模型。",
 	"Please select a payment method": "请选择支付方式",
