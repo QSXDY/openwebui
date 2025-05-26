@@ -2,7 +2,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
-import commonjs from '@rollup/plugin-commonjs';
+
 // /** @type {import('vite').Plugin} */
 // const viteServerConfig = {
 // 	name: 'log-request-middleware',
@@ -19,9 +19,7 @@ import commonjs from '@rollup/plugin-commonjs';
 
 export default defineConfig({
 	plugins: [
-		commonjs({
-			ignoreDynamicRequires: true // 解决动态 require 问题
-		}),
+
 		sveltekit(),
 		viteStaticCopy({
 			targets: [
