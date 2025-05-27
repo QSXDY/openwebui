@@ -17,6 +17,7 @@ from open_webui.models.credits import (
     CreditLogSimpleModel,
     CreditLogs,
 )
+from open_webui.utils.payment import handle_payment_callback
 from open_webui.models.models import Models, ModelPriceForm
 from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import get_current_user, get_admin_user
@@ -105,6 +106,7 @@ async def ticket_callback(request: Request) -> str:
     if callback["trade_status"] != "TRADE_SUCCESS":
         return "success"
 
+    handle_payment_callback(callback)
     # find ticket
     ticket = TradeTickets.get_ticket_by_id(callback["out_trade_no"])
     if not ticket:
