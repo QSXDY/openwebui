@@ -231,6 +231,7 @@
 										bind:value={_user.price}
 										placeholder={$i18n.t('menuprice_placeholder')}
 										autocomplete="off"
+										step="any"
 									/>
 								</div>
 							</div>

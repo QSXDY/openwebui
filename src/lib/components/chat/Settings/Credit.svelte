@@ -3,7 +3,7 @@
 	import { user } from '$lib/stores';
 	import { createTradeTicket, getCreditConfig, listCreditLog } from '$lib/apis/credit';
 	import { toast } from 'svelte-sonner';
-	import { getSessionUser } from '$lib/apis/auths';
+	import { getSessionUser, getAdminUser } from '$lib/apis/auths';
 
 	const i18n = getContext('i18n');
 
@@ -56,6 +56,7 @@
 	};
 
 	let credit = 0;
+	let adcredit = 0;
 	let payType = 'alipay';
 	let payTypes = [
 		{
@@ -206,36 +207,74 @@
 		await loadLogs(false);
 	};
 
+	const doInitadd = async () => {
+		const sessionUser = await getAdminUser(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		adcredit = sessionUser.admin_credit == null ? null : sessionUser.admin_credit;
+		console.log('企业积分', sessionUser);
+	};
+
 	onMount(async () => {
 		await doInit();
+		await doInitadd();
 	});
 </script>
 
 <div class="flex flex-col h-full justify-between text-sm">
 	<div class=" space-y-3 lg:max-h-full">
 		<div class="space-y-1">
-			<div class="pt-0.5">
-				<div class="flex flex-col w-full">
-					<div class="mb-1 text-base font-medium">{$i18n.t('Credit')}</div>
-					<div class="flex items-center">
-						<div>{credit}</div>
-						<button class="ml-1" on:click={() => doInit()}>
-							<svg
-								viewBox="0 0 1024 1024"
-								xmlns="http://www.w3.org/2000/svg"
-								width="16"
-								height="16"
-							>
-								<path
-									d="M832 512a32 32 0 0 0-32 32c0 158.784-129.216 288-288 288s-288-129.216-288-288 129.216-288 288-288c66.208 0 129.536 22.752 180.608 64H608a32 32 0 0 0 0 64h160a32 32 0 0 0 32-32V192a32 32 0 0 0-64 0v80.96A350.464 350.464 0 0 0 512 192C317.92 192 160 349.92 160 544s157.92 352 352 352 352-157.92 352-352a32 32 0 0 0-32-32"
-									fill="#3E3A39"
-								></path>
-							</svg>
-						</button>
+			<div class="flex">
+				<div class="pt-0.5 mr-5">
+					<div class="flex flex-col w-full">
+						<div class="mb-1 text-base font-medium">个人{$i18n.t('Credit')}</div>
+						<div class="flex items-center">
+							<div>{credit}</div>
+							<button class="ml-1" on:click={() => doInit()}>
+								<svg
+									viewBox="0 0 1024 1024"
+									xmlns="http://www.w3.org/2000/svg"
+									width="16"
+									height="16"
+								>
+									<path
+										d="M832 512a32 32 0 0 0-32 32c0 158.784-129.216 288-288 288s-288-129.216-288-288 129.216-288 288-288c66.208 0 129.536 22.752 180.608 64H608a32 32 0 0 0 0 64h160a32 32 0 0 0 32-32V192a32 32 0 0 0-64 0v80.96A350.464 350.464 0 0 0 512 192C317.92 192 160 349.92 160 544s157.92 352 352 352 352-157.92 352-352a32 32 0 0 0-32-32"
+										fill="#3E3A39"
+									></path>
+								</svg>
+							</button>
+						</div>
 					</div>
 				</div>
+				{#if adcredit !== null}
+					<!-- 使用Svelte规范的{#if}语法，全等判断 -->
+					<div class="pt-0.5">
+						<div class="flex flex-col w-full">
+							<div class="mb-1 text-base font-medium">
+								企业{$i18n.t('Credit')}
+								<!-- 保留原有i18n翻译 -->
+							</div>
+							<div class="flex items-center">
+								<div>{adcredit}</div>
+								<button class="ml-1" on:click={doInitadd}>
+									<svg
+										viewBox="0 0 1024 1024"
+										xmlns="http://www.w3.org/2000/svg"
+										width="16"
+										height="16"
+									>
+										<path
+											d="M832 512a32 32 0 0 0-32 32c0 158.784-129.216 288-288 288s-288-129.216-288-288 129.216-288 288-288c66.208 0 129.536 22.752 180.608 64H608a32 32 0 0 0 0 64h160a32 32 0 0 0 32-32V192a32 32 0 0 0-64 0v80.96A350.464 350.464 0 0 0 512 192C317.92 192 160 349.92 160 544s157.92 352 352 352 352-157.92 352-352a32 32 0 0 0-32-32"
+											fill="#3E3A39"
+										></path>
+									</svg>
+								</button>
+							</div>
+						</div>
+					</div>
+				{/if}
 			</div>
-
 			<div class="max-h-[14rem] flex flex-col items-center w-full">
 				<div id="trade-qrcode" class="max-h-[128px] max-w-[128px]"></div>
 				{#if tradeInfo?.detail?.imgDisplayUrl}

@@ -546,7 +546,7 @@
 		let backendConfig = null;
 		try {
 			backendConfig = await getBackendConfig();
-			console.log('Backend config:', backendConfig);
+			(backendConfig.name = 'ViVi'), console.log('项目版本:', backendConfig);
 		} catch (error) {
 			console.error('Error loading backend config:', error);
 		}

@@ -23,8 +23,44 @@
 			});
 
 			if (res) {
-				console.log('个人套餐', res);
-				// menus = res;
+				// console.log('个人套餐', res);
+
+				const unmatchedPlans = [res.subscription.plan];
+				// 1. 将unmatchedPlans转换为Map，便于快速查找
+				const planMap = new Map(unmatchedPlans.map((plan) => [plan.id, { ...plan, user_plan: 1 }]));
+
+				// 2. 处理menus中的项：匹配的替换，未匹配的标记user_plan=0
+				const matchedMenus = menus.map((menu) => {
+					if (planMap.has(menu.plan_id)) {
+						const matchedPlan = planMap.get(menu.plan_id);
+						planMap.delete(menu.plan_id); // 删除已匹配的plan，避免重复添加
+						return { ...matchedPlan, ...menu }; // 合并plan和menu字段
+					}
+					return { ...menu, user_plan: 0 }; // 未匹配的menu项
+				});
+
+				// 3. 处理未匹配的plan：添加到数组首位，标记user_plan=2
+				const unmatchedPlansToPrepend = Array.from(planMap.values()).map((plan) => ({
+					...plan,
+					user_plan: 2
+				}));
+
+				// 4. 合并结果
+				let newMenus = [...unmatchedPlansToPrepend, ...matchedMenus];
+
+				// 5. 去重：按id分组，每组保留user_plan最大的项
+				const uniqueMenusMap = new Map();
+				newMenus.forEach((menu) => {
+					const existing = uniqueMenusMap.get(menu.id);
+					if (!existing || menu.user_plan > existing.user_plan) {
+						uniqueMenusMap.set(menu.id, menu);
+					}
+				});
+
+				// 6. 转换回数组并替换原menus
+				menus = Array.from(uniqueMenusMap.values());
+
+				// console.log('新的菜单', menus);
 			}
 		} catch (err) {
 			console.error(err);
@@ -79,7 +115,7 @@
 />
 <div class="flex flex-col items-center w-full min-h-screen bg-white p-8">
 	<!-- 顶部标题和切换 -->
-	<div class="text-center mb-6">
+	<div class="text-center mb-6 flex flex-col items-center">
 		<div class="text-4xl font-extrabold mb-2 text-black">{$i18n.t('Upgrade Package')}</div>
 		<div class="text-base text-gray-500 mb-3">
 			{$i18n.t('Get more points to improve efficiency')}
@@ -135,70 +171,98 @@
 			</button>
 		</div>
 		<div
-			class="flex justify-center mb-2 p-1 rounded-full order border-gray-200 bg-gray-100 text-gray-500"
+			class="flex justify-center mb-2 p-1 w-[150px] rounded-full order border-gray-200 bg-gray-100 text-gray-500"
 		>
 			<button
-				class="px-6 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
+				class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
 				>{$i18n.t('Personal')}</button
 			>
-			<button class="px-6 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
+			<button class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
 				>{$i18n.t('Enterprise')}</button
 			>
 		</div>
 		<div class="text-xs text-gray-400 mt-2">
-			* {$i18n.t('Use two fingers to slide left and right or hold Shift to scroll more')}
+			* {$i18n.t('Use two fingers to slide left and right or hold Shift to scroll more')} *
 		</div>
 	</div>
 
 	<!-- 套餐卡片 -->
-	<div class="flex flex-row gap-6 w-full max-w-6xl justify-center mb-8">
-		{#each menus as menu (menu.id)}
+	<div class="max-w-6xl w-full overflow-auto mx-auto">
+		<div class="relative">
+			<!-- 修复：移除重复的class属性，修正CSS类名 -->
 			<div
-				class="relative bg-white rounded-2xl p-8 flex-1 min-w-[260px] max-w-[280px] flex flex-col items-start border border-gray-200 shadow-md"
+				class="flex flex-nowrap overflow-x-auto scrollbar-none snap-x snap-mandatory gap-4 pb-5 px-1 md:justify-center"
 			>
-				{#if menu.is_active}
-					<div
-						class="absolute top-4 right-4 bg-green-500 text-xs px-3 py-0.5 rounded-full text-white"
-					>
-						当前套餐
+				{#each menus.filter((menu) => menu.is_active) as menu (menu.id)}
+					<div class="flex-shrink-0 w-[300px] snap-center svelte-du15c4">
+						<div
+							class="relative bg-white rounded-2xl p-8 flex-1 min-w-[260px] max-w-[280px] flex flex-col items-start border border-gray-200 shadow-md
+						 border border-gray-200 dark:border-gray-800 rounded-xl p-6 h-full flex flex-col relative hover:shadow-lg transition-all duration-300"
+						>
+							<div class="w-full">
+								{#if menu.user_plan > 0}
+									<div
+										class={menu.user_plan === 1
+											? 'absolute top-4 right-4 text-xs px-3 py-0.5 rounded-full text-white bg-green-500'
+											: 'absolute top-4 right-4 text-xs px-3 py-0.5 rounded-full text-white bg-[#155DFC]'}
+									>
+										当前套餐
+									</div>
+								{/if}
+
+								<div class="text-xl font-bold mb-2 text-black">{menu.name}</div>
+								<div class="text-3xl font-extrabold mb-1 text-black">
+									${menu.price}
+									<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
+								</div>
+								<div class="text-xl font-bold mb-2 text-black">{menu.credits}V豆</div>
+
+								<div class="text-gray-500 text-sm mb-4 max-h-[280px] overflow-auto">
+									{menu.description}
+								</div>
+							</div>
+							<div class="flex-1 w-full flex flex-col justify-end">
+								{#if menu.user_plan === 0}
+									<button
+										class="w-full h-10 bg-[#333333] text-white py-2 rounded font-bold flex items-center justify-center gap-2"
+										on:click={() => {
+											console.log('购买', menu);
+											frmoMenu = menu; // 修正：将frmoMenu改为fromMenu
+											showDeleteConfirmDialog = true;
+										}}
+									>
+										<span class="mr-1">⟳</span> 购买
+									</button>
+								{:else if menu.user_plan === 1}
+									<div class="text-xs text-gray-400 mb-2">当前使用中</div>
+									<button
+										class="w-full h-10 bg-green-500 text-white py-2 rounded font-bold flex items-center justify-center gap-2"
+										on:click={() => {
+											console.log('续费', menu);
+											frmoMenu = menu; // 修正：将frmoMenu改为fromMenu
+											showDeleteConfirmDialog = true;
+										}}
+									>
+										<span class="mr-1">⟳</span> 续费
+									</button>
+								{:else}
+									<div class="text-xs text-[#155DFC] mb-2">当前使用中</div>
+									<button
+										class="w-full h-10 bg-[#155DFC] text-white py-2 rounded font-bold flex items-center justify-center gap-2"
+										on:click={() => {
+											console.log('联系管理员续费', menu);
+											frmoMenu = menu; // 添加：确保fromMenu被赋值
+											showDeleteConfirmDialog = true; // 添加：触发确认对话框
+										}}
+									>
+										<span class="mr-1">⟳</span> 联系管理员续费
+									</button>
+								{/if}
+							</div>
+						</div>
 					</div>
-				{/if}
-				<div class="text-xl font-bold mb-2 text-black">{menu.name}</div>
-				<div class="text-3xl font-extrabold mb-1 text-black">
-					${menu.price} <span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
-				</div>
-				<div class="text-xl font-bold mb-2 text-black">{menu.credits}点数</div>
-
-				<div class="text-gray-500 text-sm mb-4">{menu.description}</div>
-
-				{#if menu.is_active}
-					<div class="text-xs text-gray-400 mb-2">当前使用中</div>
-					<button
-						class="w-full bg-green-500 text-white py-2 rounded font-bold flex items-center justify-center gap-2"
-						on:click={() => {
-							console.log('续费', menu);
-							frmoMenu = menu;
-							showDeleteConfirmDialog = true;
-						}}
-					>
-						<span class="mr-1">⟳</span>续费
-					</button>
-				{:else}
-					<!-- on:click={() => {
-					nihasd();
-				}} -->
-					<button
-						on:click={() => {
-							console.log('订购', menu);
-							frmoMenu = menu;
-							showDeleteConfirmDialog = true;
-						}}
-						class="w-full bg-black text-white py-2 rounded font-bold flex items-center justify-center gap-2"
-					>
-						订阅
-					</button>
-				{/if}
+				{/each}
 			</div>
-		{/each}
+		</div>
 	</div>
 </div>

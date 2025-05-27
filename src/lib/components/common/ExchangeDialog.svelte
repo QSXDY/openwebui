@@ -147,27 +147,42 @@
 			}}
 		>
 			<div class="px-[1.75rem] py-6 flex flex-col">
-				<div class=" text-lg font-semibold dark:text-gray-200 mb-2.5">
+				<div class=" text-lg flex justify-between font-semibold dark:text-gray-200 mb-2.5">
 					{#if title !== ''}
 						{title}
 					{:else}
 						{$i18n.t('Order Package')}
 					{/if}
+					<button
+						class="self-center"
+						on:click={() => {
+							show = false;
+						}}
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="w-5 h-5"
+						>
+							<path
+								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
+							/>
+						</svg>
+					</button>
 				</div>
-				<div class="w-full max-w-md mx-auto rounded-2xl p-8">
-					<div class="flex justify-between">
+				<div class="w-full max-w-md mx-auto">
+					<div class="flex flex-col justify-between">
 						<div class="text-lg font-bold mb-2">套餐名称：{menu.name}</div>
 						<div class="text-lg font-bold mb-2">
 							套餐额度： {menu.credits}积分<span class="text-base font-normal text-gray-500"
-								>/{$i18n.t('day')}</span
+								>/天</span
 							>
 						</div>
 					</div>
 					<div class="text-3xl font-extrabold mb-4">
 						<span class="text-lg font-bold">套餐价格：</span> ${menu.price}
-						<span class="text-base font-normal text-gray-500"
-							>/ {menu.duration}{$i18n.t('day')}</span
-						>
+						<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
 					</div>
 
 					<div class="text-center text-gray-700 font-medium mb-4">
@@ -233,7 +248,7 @@
 						alt="二维码"
 						class="w-40 h-40 bg-white p-2 rounded-lg border"
 					/> -->
-						<div id="trade-qrcode" class="max-h-[128px] max-w-[128px]"></div>
+						<div id="trade-qrcode" class="h-[128px] w-[128px]"></div>
 					</div>
 					<div class="text-center text-gray-700 mb-2">
 						金额: <span class="font-bold">${menu.price}</span>

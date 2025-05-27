@@ -149,7 +149,7 @@
 								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
 								type="text"
 								placeholder={$i18n.t('website_logo_placeholder')}
-								bind:value={adminConfig.CUSTOM_LOGO}
+								bind:value={adminConfig.CUSTOM_PNG}
 							/>
 							<label
 								class="ml-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg cursor-pointer"
@@ -163,7 +163,7 @@
 										if (file) {
 											const reader = new FileReader();
 											reader.onload = (e) => {
-												adminConfig.CUSTOM_LOGO = e.target.result;
+												adminConfig.CUSTOM_PNG = e.target.result;
 											};
 											reader.readAsDataURL(file);
 										}

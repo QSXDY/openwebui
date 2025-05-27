@@ -93,6 +93,13 @@
 			<a
 				class="flex rounded-md py-2 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 				href="/setmenu"
+				on:click={() => {
+					show = false;
+
+					if ($mobile) {
+						showSidebar.set(false);
+					}
+				}}
 			>
 				<div class=" self-center mr-3">
 					<svg

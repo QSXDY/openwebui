@@ -126,6 +126,7 @@
 										bind:value={_user.duration}
 										placeholder={$i18n.t('menuduration_placeholder')}
 										autocomplete="off"
+										required
 									/>
 								</div>
 							</div>
