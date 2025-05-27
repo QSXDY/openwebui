@@ -89,7 +89,7 @@
 
 	onMount(async () => {
 		console.log('用户', $user);
-		untype='个人'
+		untype = '个人';
 		loaded = true;
 		menuList();
 	});
@@ -185,29 +185,33 @@
 					}}
 					class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
 					>{$i18n.t('Personal')}</button
-					>
-				{:else}
-				<button on:click={() => {
-					untype = '个人';
-				}} class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
+				>
+			{:else}
+				<button
+					on:click={() => {
+						untype = '个人';
+					}}
+					class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
 					>{$i18n.t('Enterprise')}</button
 				>
 			{/if}
 			{#if untype === '企业'}
-			<button
-				on:click={() => {
-					untype = '企业';
-				}}
-				class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
-				>{$i18n.t('Personal')}</button
+				<button
+					on:click={() => {
+						untype = '企业';
+					}}
+					class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
+					>{$i18n.t('Personal')}</button
 				>
 			{:else}
-			<button on:click={() => {
-				untype = '企业';
-			}} class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
-				>{$i18n.t('Enterprise')}</button
-			>
-		{/if}
+				<button
+					on:click={() => {
+						untype = '企业';
+					}}
+					class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
+					>{$i18n.t('Enterprise')}</button
+				>
+			{/if}
 		</div>
 		<div class="text-xs text-gray-400 mt-2">
 			* {$i18n.t('Use two fingers to slide left and right or hold Shift to scroll more')} *
@@ -238,14 +242,14 @@
 											当前套餐
 										</div>
 									{/if}
-	
+
 									<div class="text-xl font-bold mb-2 text-black">{menu.name}</div>
 									<div class="text-3xl font-extrabold mb-1 text-black">
 										${menu.price}
 										<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
 									</div>
 									<div class="text-xl font-bold mb-2 text-black">{menu.credits}V豆</div>
-	
+
 									<div class="text-gray-500 text-sm mb-4 max-h-[280px] overflow-auto">
 										{menu.description}
 									</div>
@@ -262,10 +266,7 @@
 											}}
 										>
 											<span class="mr-1">
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													class="w-5 h-5"
-													viewBox="0 0 24 24"
+												<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24"
 													><g
 														fill="none"
 														stroke="currentColor"
@@ -287,7 +288,7 @@
 											class="w-full h-10 bg-[#155DFC] text-white py-2 rounded font-bold flex items-center justify-center gap-2"
 											on:click={() => {
 												console.log('联系管理员续费', menu);
-											
+
 												showAdminDialog = true; // 添加：触发确认对话框
 											}}
 										>
@@ -336,25 +337,18 @@
 		</div>
 	{:else}
 		<div class=" mt-2 flex flex-col items-center">
-			<div class='text-2xl font-bold mb-2 text-black'>
-				企业版套餐
-			</div>
-			<div class='text-sm text-gray-500 mb-4'>
+			<div class="text-2xl font-bold mb-2 text-black">企业版套餐</div>
+			<div class="text-sm text-gray-500 mb-4">
 				如需企业版专属套餐、定制功能或批是采购，请联系我们的销售团队。
 			</div>
 			<button
-											class="w-[130px] h-10 bg-[#333333] text-white py-2 rounded font-bold flex items-center justify-center gap-2"
-											on:click={() => {
-										
-										showAdminDialog = true;
-											}}
-										>
-											<span class="mr-1"
-												> 管理员
-										</button>
+				class="w-[130px] h-10 bg-[#333333] text-white py-2 rounded font-bold flex items-center justify-center gap-2"
+				on:click={() => {
+					showAdminDialog = true;
+				}}
+			>
+				<span class="mr-1"> 管理员 </span></button
+			>
 		</div>
 	{/if}
-
-
-
 </div>
