@@ -15,6 +15,7 @@
 	let showPaymentDialog = false;
 	let loaded = false;
 	let untype = '个人';
+	let suntype = '个1人';
 	let menus: any[] = [];
 	let frmoMenu = null;
 
@@ -26,45 +27,41 @@
 			});
 
 			if (res) {
-				console.log('个人套餐', res);
 				if (res.subscription.plan == null) {
 					return;
 				}
 				const unmatchedPlans = [res.subscription.plan];
-				// 1. 将unmatchedPlans转换为Map，便于快速查找
-				const planMap = new Map(unmatchedPlans.map((plan) => [plan.id, { ...plan, user_plan: 1 }]));
-
-				// 2. 处理menus中的项：匹配的替换，未匹配的标记user_plan=0
-				const matchedMenus = menus.map((menu) => {
-					if (planMap.has(menu.plan_id)) {
-						const matchedPlan = planMap.get(menu.plan_id);
-						planMap.delete(menu.plan_id); // 删除已匹配的plan，避免重复添加
-						return { ...matchedPlan, ...menu }; // 合并plan和menu字段
-					}
-					return { ...menu, user_plan: 0 }; // 未匹配的menu项
-				});
-
-				// 3. 处理未匹配的plan：添加到数组首位，标记user_plan=2
-				const unmatchedPlansToPrepend = Array.from(planMap.values()).map((plan) => ({
+				const processedPlans = unmatchedPlans.map((plan) => ({
 					...plan,
 					user_plan: 2
 				}));
+				const menusPlans = menus.map((plan) => ({
+					...plan,
+					user_plan: 0
+				}));
+				// 1. 将当前订购的套餐转换为 Map，便于快速查找
+				const processedPlanMap = new Map(
+					processedPlans.map((plan) => [plan.id, { ...plan, user_plan: 1 }])
+				);
 
-				// 4. 合并结果
-				let newMenus = [...unmatchedPlansToPrepend, ...matchedMenus];
-
-				// 5. 去重：按id分组，每组保留user_plan最大的项
-				const uniqueMenusMap = new Map();
-				newMenus.forEach((menu) => {
-					const existing = uniqueMenusMap.get(menu.id);
-					if (!existing || menu.user_plan > existing.user_plan) {
-						uniqueMenusMap.set(menu.id, menu);
+				// 2. 处理套餐列表：匹配的套餐标记为已订购，未匹配的保持原样
+				const matchedMenus = menusPlans.map((menu) => {
+					if (processedPlanMap.has(menu.id)) {
+						// 如果套餐列表中的套餐存在于当前订购中，标记为已订购
+						const matchedPlan = processedPlanMap.get(menu.id);
+						processedPlanMap.delete(menu.id); // 删除已匹配的，剩余的是需要新增的
+						return { ...menu, ...matchedPlan, user_plan: 1 };
 					}
+					return menu; // 未匹配的保持原样
 				});
 
-				// 6. 转换回数组并替换原menus
-				menus = Array.from(uniqueMenusMap.values());
-				console.log('套餐套餐我的', menus);
+				// 3. 将未在套餐列表中出现的当前订购套餐添加到列表首位
+				const newMenus = [
+					...Array.from(processedPlanMap.values()), // 新增的套餐（未在原列表中）
+					...matchedMenus // 处理后的原套餐列表
+				];
+				menus = newMenus;
+				console.log('套餐套餐我的', newMenus);
 			}
 		} catch (err) {
 			console.error(err);
@@ -108,6 +105,8 @@
 			console.error(err);
 		}
 	};
+	import { showSidebar } from '$lib/stores';
+	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 </script>
 
 <ConfirmDialog bind:show={showDeleteConfirmDialog} menu={frmoMenu} on:confirm={() => {}} />
@@ -115,10 +114,25 @@
 <PaymentDialog
 	bind:show={showPaymentDialog}
 	on:confirm={() => {
+		menuList();
 		showPaymentDialog = false;
 	}}
 />
-<div class="flex flex-col items-center w-full min-h-screen bg-white p-8">
+<div class="flex flex-col items-center w-full min-h-screen bg-white p-3 md:p-8">
+	<div class="{$showSidebar ? 'md:hidden' : ''} self-center w-full flex flex-none items-center">
+		<button
+			id="sidebar-toggle-button"
+			class="cursor-pointer p-1.5 flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+			on:click={() => {
+				showSidebar.set(!$showSidebar);
+			}}
+			aria-label="Toggle Sidebar"
+		>
+			<div class=" m-auto self-center">
+				<MenuLines />
+			</div>
+		</button>
+	</div>
 	<!-- 顶部标题和切换 -->
 	<div class="text-center mb-6 flex flex-col items-center">
 		<div class="text-4xl font-extrabold mb-2 text-black">{$i18n.t('Upgrade Package')}</div>
@@ -175,44 +189,47 @@
 				</span>
 			</button>
 		</div>
-		<div
-			class="flex justify-center mb-2 p-1 w-[150px] rounded-full order border-gray-200 bg-gray-100 text-gray-500"
-		>
-			{#if untype === '个人'}
-				<button
-					on:click={() => {
-						untype = '个人';
-					}}
-					class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
-					>{$i18n.t('Personal')}</button
-				>
-			{:else}
-				<button
-					on:click={() => {
-						untype = '个人';
-					}}
-					class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
-					>{$i18n.t('Enterprise')}</button
-				>
-			{/if}
-			{#if untype === '企业'}
-				<button
-					on:click={() => {
-						untype = '企业';
-					}}
-					class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
-					>{$i18n.t('Personal')}</button
-				>
-			{:else}
-				<button
-					on:click={() => {
-						untype = '企业';
-					}}
-					class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
-					>{$i18n.t('Enterprise')}</button
-				>
-			{/if}
-		</div>
+		{#if suntype === '个人'}
+			<div
+				class="flex justify-center mb-2 p-1 w-[150px] rounded-full order border-gray-200 bg-gray-100 text-gray-500"
+			>
+				{#if untype === '个人'}
+					<button
+						on:click={() => {
+							untype = '个人';
+						}}
+						class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
+						>{$i18n.t('Personal')}</button
+					>
+				{:else}
+					<button
+						on:click={() => {
+							untype = '个人';
+						}}
+						class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
+						>{$i18n.t('Enterprise')}</button
+					>
+				{/if}
+				{#if untype === '企业'}
+					<button
+						on:click={() => {
+							untype = '企业';
+						}}
+						class="px-2 flex-1 py-1.5 rounded-full border border-gray-200 bg-white text-black font-medium shadow-sm focus:outline-none"
+						>{$i18n.t('Personal')}</button
+					>
+				{:else}
+					<button
+						on:click={() => {
+							untype = '企业';
+						}}
+						class="px-2 flex-1 py-1.5 rounded-full text-gray-500 font-medium"
+						>{$i18n.t('Enterprise')}</button
+					>
+				{/if}
+			</div>
+		{/if}
+
 		<div class="text-xs text-gray-400 mt-2">
 			* {$i18n.t('Use two fingers to slide left and right or hold Shift to scroll more')} *
 		</div>
@@ -245,10 +262,12 @@
 
 									<div class="text-xl font-bold mb-2 text-black">{menu.name}</div>
 									<div class="text-3xl font-extrabold mb-1 text-black">
-										${menu.price}
+										¥ {menu.price}
 										<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
 									</div>
-									<div class="text-xl font-bold mb-2 text-black">{menu.credits}V豆</div>
+									<div class="text-xl font-bold mb-2 text-black">
+										{menu.credits}V豆<span class="text-base font-normal text-gray-500">/天</span>
+									</div>
 
 									<div class="text-gray-500 text-sm mb-4 max-h-[280px] overflow-auto">
 										{menu.description}

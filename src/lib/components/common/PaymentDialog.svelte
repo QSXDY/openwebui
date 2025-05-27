@@ -44,6 +44,9 @@
 
 	// 处理确认按钮点击
 	const confirmHandler = async () => {
+		if (!inputValue) {
+			return;
+		}
 		show = false;
 		try {
 			// 调用兑换码API
