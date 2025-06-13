@@ -63,7 +63,7 @@
 				}}
 			>
 				<ArrowUpCircle strokeWidth="2" />
-				1
+				<!-- 上传知识库文件 -->
 				<div class="flex items-center">{$i18n.t('Upload files')}</div>
 			</DropdownMenu.Item>
 

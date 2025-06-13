@@ -4,7 +4,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import { onMount, getContext } from 'svelte';
 
-	import { updateUserById } from '$lib/apis/users';
+	import { updateUserByIds } from '$lib/apis/users';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
@@ -26,11 +26,12 @@
 	};
 
 	const submitHandler = async () => {
-		const res = await updateUserById(localStorage.token, selectedUser.id, _user).catch((error) => {
+		const res = await updateUserByIds(localStorage.token, selectedUser.id, _user).catch((error) => {
 			toast.error(`${error}`);
 		});
 
 		if (res) {
+			toast.success(`${$i18n.t('Valves updated successfully')}`);
 			dispatch('save');
 			show = false;
 		}

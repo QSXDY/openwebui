@@ -49,7 +49,7 @@
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		[key: string]: any;
 	}[] = [];
-
+	// console.log('items-items',items);
 	export let className = 'w-[32rem]';
 	export let triggerClassName = 'text-lg';
 

@@ -450,3 +450,45 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 
 	return res;
 };
+
+type UserUpdateForms = {
+	profile_image_url: string;
+	email: string;
+	name: string;
+	password: string;
+	credit: number;
+};
+
+export const updateUserByIds = async (token: string, userId: string, user: UserUpdateForms) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}/update`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			profile_image_url: user.profile_image_url,
+			email: user.email,
+			name: user.name,
+			password: user.password !== '' ? user.password : undefined,
+			credit: user.credit
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};

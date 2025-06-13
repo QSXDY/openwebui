@@ -1,200 +1,52 @@
 <script lang="ts">
 	import { marked } from 'marked';
 
-	import { toast } from 'svelte-sonner';
-	import Sortable from 'sortablejs';
-
-	import fileSaver from 'file-saver';
-	const { saveAs } = fileSaver;
-
-	import { onMount, getContext, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { onMount, getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, config, mobile, models as _models, settings, user } from '$lib/stores';
-	import {
-		createNewModel,
-		deleteModelById,
-		getModels as getWorkspaceModels,
-		toggleModelById,
-		updateModelById
-	} from '$lib/apis/models';
+	import { WEBUI_NAME, config, models as _models, settings, models } from '$lib/stores';
 
 	import { getModels } from '$lib/apis';
 	import { getGroups } from '$lib/apis/groups';
-
-	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
-	import ModelMenu from './Models/ModelMenu.svelte';
-	import ModelDeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Search from '../icons/Search.svelte';
-	import Plus from '../icons/Plus.svelte';
 	import ChevronRight from '../icons/ChevronRight.svelte';
-	import Switch from '../common/Switch.svelte';
 	import Spinner from '../common/Spinner.svelte';
-	import { capitalizeFirstLetter } from '$lib/utils';
-
-	let shiftKey = false;
-
-	let importFiles;
-	let modelsImportInputElement: HTMLInputElement;
 	let loaded = false;
+	let tagsContainerElement;
 
-	let models = [];
-
-	let filteredModels = [];
-	let selectedModel = null;
-
-	let showModelDeleteConfirm = false;
-
-	let group_ids = [];
-
-	$: if (models) {
-		filteredModels = models.filter(
-			(m) => searchValue === '' || m.name.toLowerCase().includes(searchValue.toLowerCase())
-		);
-	}
-
+	let selectedTag = '';
+	let selectedConnectionType = '';
+	let modelslist = [];
+	let tags = [];
 	let searchValue = '';
 
-	const deleteModelHandler = async (model) => {
-		const res = await deleteModelById(localStorage.token, model.id).catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
-
-		if (res) {
-			toast.success($i18n.t(`Deleted {{name}}`, { name: model.id }));
-		}
-
-		await _models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
-		models = await getWorkspaceModels(localStorage.token);
-	};
-
-	const cloneModelHandler = async (model) => {
-		sessionStorage.model = JSON.stringify({
-			...model,
-			id: `${model.id}-clone`,
-			name: `${model.name} (Clone)`
-		});
-		goto('/workspace/models/create');
-	};
-
-	const shareModelHandler = async (model) => {
-		toast.success($i18n.t('Redirecting you to Open WebUI Community'));
-
-		const url = 'https://openwebui.com';
-
-		const tab = await window.open(`${url}/models/create`, '_blank');
-
-		const messageHandler = (event) => {
-			if (event.origin !== url) return;
-			if (event.data === 'loaded') {
-				tab.postMessage(JSON.stringify(model), '*');
-				window.removeEventListener('message', messageHandler);
+	$: {
+		const lisda = $models.filter((item) => {
+			if (selectedTag === '') {
+				return true;
 			}
-		};
-
-		window.addEventListener('message', messageHandler, false);
-	};
-
-	const hideModelHandler = async (model) => {
-		let info = model.info;
-
-		if (!info) {
-			info = {
-				id: model.id,
-				name: model.name,
-				meta: {
-					suggestion_prompts: null
-				},
-				params: {}
-			};
-		}
-
-		info.meta = {
-			...info.meta,
-			hidden: !(info?.meta?.hidden ?? false)
-		};
-
-		console.log(info);
-
-		const res = await updateModelById(localStorage.token, info.id, info);
-
-		if (res) {
-			toast.success(
-				$i18n.t(`Model {{name}} is now {{status}}`, {
-					name: info.id,
-					status: info.meta.hidden ? 'hidden' : 'visible'
-				})
-			);
-		}
-
-		await _models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
-		models = await getWorkspaceModels(localStorage.token);
-	};
-
-	const downloadModels = async (models) => {
-		let blob = new Blob([JSON.stringify(models)], {
-			type: 'application/json'
+			return (item.tags ?? []).map((tag) => tag.name).includes(selectedTag);
 		});
-		saveAs(blob, `models-export-${Date.now()}.json`);
-	};
+		modelslist = lisda;
 
-	const exportModelHandler = async (model) => {
-		let blob = new Blob([JSON.stringify([model])], {
-			type: 'application/json'
-		});
-		saveAs(blob, `${model.id}-${Date.now()}.json`);
-	};
+		// 在这里可以添加当 selectedTag 变化时需要执行的逻辑
+	}
 
 	onMount(async () => {
-		models = await getModels(
-			localStorage.token,
-			$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-		);
+		modelslist = $models;
+		if (modelslist) {
+			tags = modelslist
+				.filter((item) => !(item.info?.meta?.hidden ?? false))
+				.flatMap((item) => item.tags ?? [])
+				.map((tag) => tag.name);
 
-		let groups = await getGroups(localStorage.token);
-		group_ids = groups.map((group) => group.id);
+			// Remove duplicates and sort
+			tags = Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
+			// console.log('modelstagstagstagslist',modelslist, tags);
+		}
 
 		loaded = true;
-
-		const onKeyDown = (event) => {
-			if (event.key === 'Shift') {
-				shiftKey = true;
-			}
-		};
-
-		const onKeyUp = (event) => {
-			if (event.key === 'Shift') {
-				shiftKey = false;
-			}
-		};
-
-		const onBlur = () => {
-			shiftKey = false;
-		};
-
-		window.addEventListener('keydown', onKeyDown);
-		window.addEventListener('keyup', onKeyUp);
-		window.addEventListener('blur-sm', onBlur);
-
-		return () => {
-			window.removeEventListener('keydown', onKeyDown);
-			window.removeEventListener('keyup', onKeyUp);
-			window.removeEventListener('blur-sm', onBlur);
-		};
 	});
 </script>
 
@@ -205,22 +57,53 @@
 </svelte:head>
 
 {#if loaded}
-	<ModelDeleteConfirmDialog
-		bind:show={showModelDeleteConfirm}
-		on:confirm={() => {
-			deleteModelHandler(selectedModel);
-		}}
-	/>
-
 	<div class="flex flex-col gap-1 my-1.5">
 		<div class="flex justify-between items-center">
-			<div class="flex items-center md:self-center text-xl font-medium px-0.5">
-				{$i18n.t('Models')}
-				<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50 dark:bg-gray-850" />
-				<span class="text-lg font-medium text-gray-500 dark:text-gray-300"
-					>{filteredModels.length}</span
+			{#if tags && modelslist.filter((item) => !(item.info?.meta?.hidden ?? false)).length > 0}
+				<div
+					class=" flex w-full sticky top-0 z-10 bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none"
+					on:wheel={(e) => {
+						if (e.deltaY !== 0) {
+							e.preventDefault();
+							e.currentTarget.scrollLeft += e.deltaY;
+						}
+					}}
 				>
-			</div>
+					<div
+						class="flex gap-1 w-fit text-center text-sm font-medium rounded-full bg-transparent px-1.5 pb-0.5"
+						bind:this={tagsContainerElement}
+					>
+						{#if (modelslist.find((item) => item.model?.owned_by === 'ollama') && modelslist.find((item) => item.model?.owned_by === 'openai')) || modelslist.find((item) => item.model?.direct) || tags.length > 0}
+							<button
+								class="min-w-fit outline-none p-1.5 {selectedTag === '' &&
+								selectedConnectionType === ''
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+								on:click={() => {
+									selectedConnectionType = '';
+									selectedTag = '';
+								}}
+							>
+								{$i18n.t('All')}
+							</button>
+						{/if}
+
+						{#each tags as tag}
+							<button
+								class="min-w-fit outline-none p-1.5 {selectedTag === tag
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+								on:click={() => {
+									selectedConnectionType = '';
+									selectedTag = tag;
+								}}
+							>
+								{tag}
+							</button>
+						{/each}
+					</div>
+				</div>
+			{/if}
 		</div>
 
 		<div class=" flex flex-1 items-center w-full space-x-2">
@@ -238,20 +121,16 @@
 	</div>
 
 	<div class=" my-2 mb-5 gap-2 grid lg:grid-cols-2 xl:grid-cols-3" id="model-list">
-		{#each filteredModels as model}
+		{#each modelslist as model}
 			<div
 				class=" flex flex-col cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition"
 				id="model-item-{model.id}"
 			>
 				<div class="flex gap-4 mt-0.5 mb-0.5">
 					<div class=" w-[44px]">
-						<div
-							class=" rounded-full object-cover {model.is_active
-								? ''
-								: 'opacity-50 dark:opacity-50'} "
-						>
+						<div class=" rounded-full object-cover {model.is_active ? '' : ''} ">
 							<img
-								src={model?.meta?.profile_image_url ?? '/static/favicon.png'}
+								src={model?.info?.meta?.profile_image_url ?? '/static/favicon.png'}
 								alt="modelfile profile"
 								class=" rounded-full w-full h-auto object-cover"
 							/>
@@ -262,9 +141,9 @@
 						class=" flex flex-1 cursor-pointer w-full"
 						href={`/?models=${encodeURIComponent(model.id)}`}
 					>
-						<div class=" flex-1 self-center {model.is_active ? '' : 'text-gray-500'}">
+						<div class=" flex-1 self-center {model.is_active ? '' : 'text-gray'}">
 							<Tooltip
-								content={marked.parse(model?.meta?.description ?? model.id)}
+								content={marked.parse(model?.info?.meta?.description ?? model.id)}
 								className=" w-fit"
 								placement="top-start"
 							>
@@ -272,9 +151,9 @@
 							</Tooltip>
 
 							<div class="flex gap-1 text-xs overflow-hidden">
-								<div class="line-clamp-1">
-									{#if (model?.meta?.description ?? '').trim()}
-										{model?.meta?.description}
+								<div class="line-clamp-3">
+									{#if (model?.info?.meta?.description ?? '').trim()}
+										{model?.info?.meta?.description}
 									{:else}
 										{model.id}
 									{/if}
@@ -283,7 +162,23 @@
 						</div>
 					</a>
 				</div>
-
+				<div class="w-full flex items-center justify-end gap-1">
+					{#if model?.tags?.length > 0}
+						<div
+							class="flex gap-0.5 self-center items-center h-full translate-y-[0.5px] overflow-x-auto scrollbar-none"
+						>
+							{#each model.tags as tag}
+								<Tooltip content={tag.name} className="flex-shrink-0">
+									<div
+										class="text-xs font-bold px-1 rounded-sm uppercase bg-gray-500/20 text-gray-700 dark:text-gray-200"
+									>
+										{tag.name}
+									</div>
+								</Tooltip>
+							{/each}
+						</div>
+					{/if}
+				</div>
 				<!-- <div class="flex justify-between items-center -mb-0.5 px-0.5">
 					<div class=" text-xs mt-0.5">
 						<Tooltip
@@ -291,7 +186,7 @@
 							className="flex shrink-0"
 							placement="top-start"
 						>
-							<div class="shrink-0 text-gray-500">
+							<div class="shrink-0 text-gray">
 								{$i18n.t('By {{name}}', {
 									name: capitalizeFirstLetter(
 										model?.user?.name ?? model?.user?.email ?? $i18n.t('Deleted User')

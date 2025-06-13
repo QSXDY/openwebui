@@ -509,7 +509,7 @@
 							}}
 						>
 							<div
-								class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border border-gray-50 dark:border-gray-850 hover:border-gray-100 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800 transition px-1 bg-white/90 dark:bg-gray-400/5 dark:text-gray-100"
+								class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border border-gray-90 dark:border-gray-850 hover:border-gray-100 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800 transition px-1 bg-white/90 dark:bg-gray-400/5 dark:text-gray-100"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
 								{#if files.length > 0}
@@ -604,7 +604,7 @@
 								<div class="px-2.5">
 									{#if $settings?.richTextInput ?? true}
 										<div
-											class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit max-h-80 overflow-auto"
+											class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-3 px-1 resize-none h-fit min-h-[70px] max-h-80 overflow-auto"
 											id="chat-input-container"
 										>
 											<RichTextInput
