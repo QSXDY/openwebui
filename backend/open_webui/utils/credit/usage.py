@@ -180,6 +180,7 @@ class CreditDeduct:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         from open_webui.models.groups import Groups
+        from open_webui.models.subscription import SubscriptionCredits
 
         # 获取用户所在的权限组
         group = Groups.get_user_group(self.user.id)
@@ -191,45 +192,99 @@ class CreditDeduct:
             # 获取管理员的积分
             admin_credit = Credits.get_credit_by_user_id(group.admin_id)
 
-            # 如果管理员有足够的积分，则扣除管理员的积分
-            if admin_credit and admin_credit.credit >= self.total_price:
+            # 检查管理员的总积分是否足够
+            if admin_credit and float(admin_credit.credit) >= self.total_price:
                 user_id_to_deduct = group.admin_id
                 desc = f"{desc} (代用户 {self.user.id} 支付)"
 
-        # 扣除积分
-        Credits.add_credit_by_user_id(
-            form_data=AddCreditForm(
-                user_id=user_id_to_deduct,
-                amount=Decimal(-self.total_price),
-                detail=SetCreditFormDetail(
-                    usage={
-                        "total_price": float(self.total_price),
-                        "prompt_unit_price": float(self.prompt_unit_price),
-                        "completion_unit_price": float(self.completion_unit_price),
-                        "request_unit_price": float(self.request_unit_price),
-                        "feature_price": float(self.feature_price),
-                        "features": list(self.features),
-                        **self.usage.model_dump(exclude_unset=True, exclude_none=True),
-                    },
-                    api_params={
-                        "model": (
-                            self.model.model_dump(exclude_unset=True, exclude_none=True)
-                            if self.model
-                            else {"id": self.model_id}
-                        ),
-                        "is_stream": self.is_stream,
-                    },
-                    desc=desc,
-                ),
+        # 优先消费套餐积分
+        remaining_cost = int(self.total_price)
+
+        # 先尝试消费套餐积分
+        if remaining_cost > 0:
+            subscription_result = SubscriptionCredits.consume_subscription_credits(
+                user_id_to_deduct, remaining_cost
             )
-        )
+
+            if subscription_result["success"]:
+                consumed_subscription_credits = subscription_result["total_consumed"]
+                remaining_cost = subscription_result["remaining_amount"]
+
+                # 记录套餐积分消费日志
+                if consumed_subscription_credits > 0:
+                    Credits.add_credit_by_user_id(
+                        form_data=AddCreditForm(
+                            user_id=user_id_to_deduct,
+                            amount=Decimal(0),  # 不改变总积分，只记录日志
+                            detail=SetCreditFormDetail(
+                                desc=f"套餐积分消费: -{consumed_subscription_credits}",
+                                usage={
+                                    "subscription_credits_consumed": consumed_subscription_credits,
+                                    "consumed_records": subscription_result[
+                                        "consumed_records"
+                                    ],
+                                    **self.usage.model_dump(
+                                        exclude_unset=True, exclude_none=True
+                                    ),
+                                },
+                                api_params={
+                                    "model": (
+                                        self.model.model_dump(
+                                            exclude_unset=True, exclude_none=True
+                                        )
+                                        if self.model
+                                        else {"id": self.model_id}
+                                    ),
+                                    "is_stream": self.is_stream,
+                                },
+                            ),
+                        )
+                    )
+
+        # 如果套餐积分不足，使用普通积分
+        if remaining_cost > 0:
+            Credits.add_credit_by_user_id(
+                form_data=AddCreditForm(
+                    user_id=user_id_to_deduct,
+                    amount=Decimal(-remaining_cost),
+                    detail=SetCreditFormDetail(
+                        usage={
+                            "total_price": float(self.total_price),
+                            "subscription_credits_used": int(self.total_price)
+                            - remaining_cost,
+                            "regular_credits_used": remaining_cost,
+                            "prompt_unit_price": float(self.prompt_unit_price),
+                            "completion_unit_price": float(self.completion_unit_price),
+                            "request_unit_price": float(self.request_unit_price),
+                            "feature_price": float(self.feature_price),
+                            "features": list(self.features),
+                            **self.usage.model_dump(
+                                exclude_unset=True, exclude_none=True
+                            ),
+                        },
+                        api_params={
+                            "model": (
+                                self.model.model_dump(
+                                    exclude_unset=True, exclude_none=True
+                                )
+                                if self.model
+                                else {"id": self.model_id}
+                            ),
+                            "is_stream": self.is_stream,
+                        },
+                        desc=desc,
+                    ),
+                )
+            )
         logger.info(
-            "[credit_deduct] user: %s; actual_payer: %s; tokens: %d %d; cost: %s",
+            "[credit_deduct] user: %s; actual_payer: %s; tokens: %d %d; cost: %s; subscription_used: %d; regular_used: %d",
             self.user.id,
             user_id_to_deduct,
             self.usage.prompt_tokens,
             self.usage.completion_tokens,
             self.total_price,
+            int(self.total_price) - remaining_cost,
+            remaining_cost,
         )
 
     @property

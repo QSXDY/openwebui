@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
-    """任务调度器 - 处理每日积分发放等定时任务"""
+    """任务调度器 - 处理定时任务（已移除每日积分发放）"""
 
     def __init__(self):
         self.running = False
@@ -36,21 +36,20 @@ class TaskScheduler:
 
     def _run_scheduler(self):
         """运行调度器主循环"""
-        last_daily_grant_date = None
+        last_expire_check_date = None
 
         while self.running:
             try:
                 current_date = datetime.now().date()
 
-                # 检查是否需要执行每日积分发放（每天执行一次）
-                if last_daily_grant_date != current_date:
-                    # 在每天的指定时间执行（比如凌晨1点）
+                # 检查套餐过期（每天执行一次）
+                if last_expire_check_date != current_date:
                     current_hour = datetime.now().hour
                     if current_hour >= 1:  # 凌晨1点后执行
-                        logger.info(f"开始执行每日积分发放任务 - {current_date}")
-                        self._execute_daily_credit_grants()
-                        last_daily_grant_date = current_date
-                        logger.info(f"每日积分发放任务完成 - {current_date}")
+                        logger.info(f"开始检查套餐过期 - {current_date}")
+                        self._check_subscription_expiry()
+                        last_expire_check_date = current_date
+                        logger.info(f"套餐过期检查完成 - {current_date}")
 
                 # 每小时检查一次
                 time.sleep(3600)
@@ -59,15 +58,21 @@ class TaskScheduler:
                 logger.error(f"任务调度器运行错误: {str(e)}")
                 time.sleep(300)  # 发生错误时等待5分钟后重试
 
-    def _execute_daily_credit_grants(self) -> Dict[str, Any]:
-        """执行每日积分发放任务"""
+    def _check_subscription_expiry(self) -> Dict[str, Any]:
+        """检查套餐过期"""
         try:
-            result = DailyCreditGrants.process_daily_grants_for_all_users()
-            logger.info(f"每日积分发放结果: {result}")
+            from open_webui.models.subscription import SubscriptionCredits
+
+            result = SubscriptionCredits.check_and_expire_subscriptions()
+            logger.info(f"套餐过期检查结果: {result}")
             return result
         except Exception as e:
-            logger.error(f"每日积分发放失败: {str(e)}")
-            return {"success": False, "error": str(e), "message": "每日积分发放失败"}
+            logger.error(f"套餐过期检查失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    # 移除每日积分发放相关方法
+    # def _execute_daily_credit_grants(self):
+    #     pass
 
 
 # 全局任务调度器实例

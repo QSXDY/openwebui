@@ -106,6 +106,25 @@ class Payment(Base):
     )
 
 
+class SubscriptionCredit(Base):
+    __tablename__ = "subscription_credits"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, nullable=False, index=True)
+    subscription_id = Column(String, ForeignKey("subscription_subscriptions.id"))
+    plan_id = Column(String, ForeignKey("subscription_plans.id"))
+    total_credits = Column(BigInteger, default=0)  # 套餐总积分
+    remaining_credits = Column(BigInteger, default=0)  # 剩余积分
+    consumed_credits = Column(BigInteger, default=0)  # 已消费积分
+    start_date = Column(BigInteger, nullable=False)  # 套餐开始时间
+    end_date = Column(BigInteger, nullable=False)  # 套餐结束时间
+    status = Column(String(20), default="active")  # active, expired, consumed
+    created_at = Column(BigInteger, default=lambda: int(time.time()))
+    updated_at = Column(
+        BigInteger, default=lambda: int(time.time()), onupdate=lambda: int(time.time())
+    )
+
+
 ####################
 # Forms
 ####################
@@ -170,6 +189,22 @@ class PaymentModel(BaseModel):
     status: str = "pending"  # pending, completed, failed
     payment_method: str  # 支付方式，例如 alipay, wechat
     transaction_id: Optional[str] = None  # 第三方支付平台的交易ID
+    created_at: int = Field(default_factory=lambda: int(time.time()))
+    updated_at: int = Field(default_factory=lambda: int(time.time()))
+
+
+class SubscriptionCreditModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    subscription_id: str
+    plan_id: str
+    total_credits: int = 0
+    remaining_credits: int = 0
+    consumed_credits: int = 0
+    start_date: int
+    end_date: int
+    status: str = "active"
     created_at: int = Field(default_factory=lambda: int(time.time()))
     updated_at: int = Field(default_factory=lambda: int(time.time()))
 
@@ -394,7 +429,7 @@ class SubscriptionsTable:
         try:
             user_id = data.get("user_id")
             plan_id = data.get("plan_id")
-            duration_days = data.get("duration_days", 30)
+            duration_days = data.get("duration_days", 31)
 
             if not user_id or not plan_id:
                 raise HTTPException(status_code=400, detail="用户ID和套餐ID不能为空")
@@ -405,14 +440,15 @@ class SubscriptionsTable:
                 if not plan:
                     raise HTTPException(status_code=404, detail="套餐不存在")
 
-                # 检查用户是否已有活跃订阅
                 start_date = int(time.time())
                 end_date = start_date + duration_days * 86400
 
+                # 检查是否为续费（同一套餐的活跃订阅）
                 existing_subscription = (
                     db.query(Subscription)
                     .filter(
                         Subscription.user_id == user_id,
+                        Subscription.plan_id == plan_id,
                         Subscription.status == "active",
                         Subscription.end_date > int(time.time()),
                     )
@@ -420,14 +456,51 @@ class SubscriptionsTable:
                 )
 
                 if existing_subscription:
-                    # 如果已有订阅，更新套餐和结束日期
-                    existing_subscription.plan_id = plan_id
+                    # 续费逻辑：先扣除剩余积分，再添加新积分
+                    expire_result = SubscriptionCredits.expire_subscription_credits(
+                        user_id, existing_subscription.id
+                    )
+
+                    # 更新订阅结束时间
                     existing_subscription.end_date = end_date
                     existing_subscription.updated_at = int(time.time())
                     subscription_id = existing_subscription.id
-                    db.commit()
+
+                    # 创建新的套餐积分记录
+                    SubscriptionCredits.create_subscription_credit(
+                        user_id, subscription_id, plan_id, plan.credits, duration_days
+                    )
+
+                    # 添加新的套餐积分到用户总积分
+                    from open_webui.models.credits import (
+                        Credits,
+                        AddCreditForm,
+                        SetCreditFormDetail,
+                    )
+
+                    Credits.add_credit_by_user_id(
+                        AddCreditForm(
+                            user_id=user_id,
+                            amount=Decimal(plan.credits),
+                            detail=SetCreditFormDetail(
+                                desc=f"套餐续费积分发放 - 套餐: {plan.name} ({duration_days}天)",
+                                api_params={
+                                    "subscription_id": subscription_id,
+                                    "plan_id": plan_id,
+                                    "is_renewal": True,
+                                    "deducted_credits": expire_result.get(
+                                        "deducted_credits", 0
+                                    ),
+                                },
+                                usage={
+                                    "subscription_renewal": True,
+                                    "credits_granted": plan.credits,
+                                },
+                            ),
+                        )
+                    )
                 else:
-                    # 创建新订阅
+                    # 新订阅
                     subscription_id = str(uuid.uuid4())
                     new_subscription = Subscription(
                         id=subscription_id,
@@ -438,7 +511,39 @@ class SubscriptionsTable:
                         end_date=end_date,
                     )
                     db.add(new_subscription)
-                    db.commit()
+
+                    # 创建套餐积分记录
+                    SubscriptionCredits.create_subscription_credit(
+                        user_id, subscription_id, plan_id, plan.credits, duration_days
+                    )
+
+                    # 添加套餐积分到用户总积分
+                    from open_webui.models.credits import (
+                        Credits,
+                        AddCreditForm,
+                        SetCreditFormDetail,
+                    )
+
+                    Credits.add_credit_by_user_id(
+                        AddCreditForm(
+                            user_id=user_id,
+                            amount=Decimal(plan.credits),
+                            detail=SetCreditFormDetail(
+                                desc=f"套餐订阅积分发放 - 套餐: {plan.name} ({duration_days}天)",
+                                api_params={
+                                    "subscription_id": subscription_id,
+                                    "plan_id": plan_id,
+                                    "is_new_subscription": True,
+                                },
+                                usage={
+                                    "subscription_new": True,
+                                    "credits_granted": plan.credits,
+                                },
+                            ),
+                        )
+                    )
+
+                db.commit()
 
                 return {
                     "success": True,
@@ -449,6 +554,8 @@ class SubscriptionsTable:
                         "status": "active",
                         "start_date": start_date,
                         "end_date": end_date,
+                        "credits_granted": plan.credits,
+                        "is_renewal": existing_subscription is not None,
                     },
                 }
         except Exception as e:
@@ -1082,3 +1189,264 @@ class PaymentsTable:
 
 
 Payments = PaymentsTable()
+
+
+class SubscriptionCreditsTable:
+    def create_subscription_credit(
+        self,
+        user_id: str,
+        subscription_id: str,
+        plan_id: str,
+        credits: int,
+        duration_days: int = 31,
+    ) -> Optional[SubscriptionCreditModel]:
+        """创建套餐积分记录"""
+        try:
+            start_date = int(time.time())
+            end_date = start_date + duration_days * 86400
+
+            with get_db() as db:
+                subscription_credit = SubscriptionCredit(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    subscription_id=subscription_id,
+                    plan_id=plan_id,
+                    total_credits=credits,
+                    remaining_credits=credits,
+                    consumed_credits=0,
+                    start_date=start_date,
+                    end_date=end_date,
+                    status="active",
+                )
+                db.add(subscription_credit)
+                db.commit()
+                db.refresh(subscription_credit)
+
+                return SubscriptionCreditModel.model_validate(
+                    {
+                        c.name: getattr(subscription_credit, c.name)
+                        for c in subscription_credit.__table__.columns
+                    }
+                )
+        except Exception as e:
+            print(f"创建套餐积分记录失败: {str(e)}")
+            return None
+
+    def get_user_active_subscription_credits(
+        self, user_id: str
+    ) -> List[SubscriptionCreditModel]:
+        """获取用户所有活跃的套餐积分记录，按创建时间排序"""
+        try:
+            with get_db() as db:
+                credits = (
+                    db.query(SubscriptionCredit)
+                    .filter(
+                        SubscriptionCredit.user_id == user_id,
+                        SubscriptionCredit.status == "active",
+                        SubscriptionCredit.remaining_credits > 0,
+                    )
+                    .order_by(
+                        SubscriptionCredit.created_at.asc()
+                    )  # 按创建时间升序，优先消费早期套餐
+                    .all()
+                )
+
+                return [
+                    SubscriptionCreditModel.model_validate(
+                        {
+                            c.name: getattr(credit, c.name)
+                            for c in credit.__table__.columns
+                        }
+                    )
+                    for credit in credits
+                ]
+        except Exception:
+            return []
+
+    def consume_subscription_credits(self, user_id: str, amount: int) -> Dict[str, Any]:
+        """消费套餐积分，按时间顺序优先消费早期套餐"""
+        try:
+            remaining_amount = amount
+            consumed_records = []
+
+            with get_db() as db:
+                # 获取用户所有可用的套餐积分，按创建时间排序
+                subscription_credits = (
+                    db.query(SubscriptionCredit)
+                    .filter(
+                        SubscriptionCredit.user_id == user_id,
+                        SubscriptionCredit.status == "active",
+                        SubscriptionCredit.remaining_credits > 0,
+                    )
+                    .order_by(SubscriptionCredit.created_at.asc())
+                    .all()
+                )
+
+                for sub_credit in subscription_credits:
+                    if remaining_amount <= 0:
+                        break
+
+                    # 计算本次消费金额
+                    consume_amount = min(sub_credit.remaining_credits, remaining_amount)
+
+                    # 更新套餐积分记录
+                    sub_credit.remaining_credits -= consume_amount
+                    sub_credit.consumed_credits += consume_amount
+
+                    # 如果积分用完，标记为已消费
+                    if sub_credit.remaining_credits <= 0:
+                        sub_credit.status = "consumed"
+
+                    sub_credit.updated_at = int(time.time())
+
+                    consumed_records.append(
+                        {
+                            "subscription_id": sub_credit.subscription_id,
+                            "plan_id": sub_credit.plan_id,
+                            "consumed": consume_amount,
+                            "remaining": sub_credit.remaining_credits,
+                        }
+                    )
+
+                    remaining_amount -= consume_amount
+
+                db.commit()
+
+                return {
+                    "success": True,
+                    "total_consumed": amount - remaining_amount,
+                    "remaining_amount": remaining_amount,
+                    "consumed_records": consumed_records,
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "total_consumed": 0,
+                "remaining_amount": amount,
+            }
+
+    def expire_subscription_credits(
+        self, user_id: str, subscription_id: str
+    ) -> Dict[str, Any]:
+        """套餐过期处理，扣除剩余积分"""
+        try:
+            with get_db() as db:
+                # 获取该订阅的积分记录
+                sub_credit = (
+                    db.query(SubscriptionCredit)
+                    .filter(
+                        SubscriptionCredit.user_id == user_id,
+                        SubscriptionCredit.subscription_id == subscription_id,
+                        SubscriptionCredit.status == "active",
+                    )
+                    .first()
+                )
+
+                if not sub_credit:
+                    return {"success": True, "deducted_credits": 0}
+
+                deducted_credits = sub_credit.remaining_credits
+
+                if deducted_credits > 0:
+                    # 从用户总积分中扣除剩余的套餐积分
+                    from open_webui.models.credits import (
+                        Credits,
+                        AddCreditForm,
+                        SetCreditFormDetail,
+                    )
+
+                    Credits.add_credit_by_user_id(
+                        AddCreditForm(
+                            user_id=user_id,
+                            amount=Decimal(-deducted_credits),
+                            detail=SetCreditFormDetail(
+                                desc=f"套餐过期扣除剩余积分: -{deducted_credits}",
+                                api_params={
+                                    "subscription_id": subscription_id,
+                                    "plan_id": sub_credit.plan_id,
+                                    "expired_credits": deducted_credits,
+                                },
+                                usage={"subscription_expired": True},
+                            ),
+                        )
+                    )
+
+                # 标记套餐积分为过期
+                sub_credit.status = "expired"
+                sub_credit.updated_at = int(time.time())
+                db.commit()
+
+                return {
+                    "success": True,
+                    "deducted_credits": deducted_credits,
+                    "subscription_id": subscription_id,
+                }
+        except Exception as e:
+            return {"success": False, "error": str(e), "deducted_credits": 0}
+
+    def check_and_expire_subscriptions(self) -> Dict[str, Any]:
+        """检查并处理过期的套餐"""
+        try:
+            current_time = int(time.time())
+            expired_count = 0
+            total_deducted = 0
+
+            with get_db() as db:
+                # 获取所有过期的套餐积分记录
+                expired_credits = (
+                    db.query(SubscriptionCredit)
+                    .filter(
+                        SubscriptionCredit.status == "active",
+                        SubscriptionCredit.end_date <= current_time,
+                    )
+                    .all()
+                )
+
+                for sub_credit in expired_credits:
+                    result = self.expire_subscription_credits(
+                        sub_credit.user_id, sub_credit.subscription_id
+                    )
+                    if result["success"]:
+                        expired_count += 1
+                        total_deducted += result["deducted_credits"]
+
+                return {
+                    "success": True,
+                    "expired_count": expired_count,
+                    "total_deducted_credits": total_deducted,
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "expired_count": 0,
+                "total_deducted_credits": 0,
+            }
+
+    def get_total_active_credits(self, user_id: str) -> int:
+        """获取用户所有活跃套餐的总积分"""
+        try:
+            with get_db() as db:
+                current_time = int(time.time())
+                active_credits = (
+                    db.query(SubscriptionCredit)
+                    .filter(
+                        SubscriptionCredit.user_id == user_id,
+                        SubscriptionCredit.status == "active",
+                        SubscriptionCredit.end_date > current_time,
+                        SubscriptionCredit.remaining_credits > 0,
+                    )
+                    .all()
+                )
+
+                total_credits = sum(
+                    credit.remaining_credits for credit in active_credits
+                )
+                return total_credits
+        except Exception as e:
+            print(f"Error getting total active credits: {e}")
+            return 0
+
+
+SubscriptionCredits = SubscriptionCreditsTable()

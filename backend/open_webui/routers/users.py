@@ -87,7 +87,7 @@ async def get_all_users(
     user_data = Users.get_users()
     users = user_data["users"]
     credit_map = {
-        credit.user_id: {"credit": "%.4f" % credit.credit}
+        credit.user_id: {"credit": int(credit.credit)}  # 改为整数显示
         for credit in Credits.list_credits_by_user_id(
             user_ids=(user.id for user in users)
         )

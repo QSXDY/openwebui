@@ -104,6 +104,9 @@ def is_free_request(model_price: list, form_data: dict) -> bool:
 
 
 def check_credit_by_user_id(user_id: str, form_data: dict) -> None:
+    from open_webui.models.groups import Groups
+    from open_webui.models.subscription import SubscriptionCredits
+
     # load model
     model_id = form_data.get("model") or form_data.get("model_id") or ""
     model = Models.get_model_by_id(model_id)
@@ -112,11 +115,41 @@ def check_credit_by_user_id(user_id: str, form_data: dict) -> None:
     # check for free
     if is_free_request(model_price=model_price, form_data=form_data):
         return
+
+    # 获取用户所在的权限组
+    group = Groups.get_user_group(user_id)
+    user_id_to_check = user_id
+
+    # 如果用户在权限组中且该组有管理员，并且用户不是管理员
+    if group and group.admin_id and group.admin_id != user_id:
+        # 获取管理员的积分
+        admin_credit = Credits.get_credit_by_user_id(group.admin_id)
+
+        # 检查管理员的总积分（包括套餐积分）是否足够
+        admin_subscription_credits = SubscriptionCredits.get_total_active_credits(
+            group.admin_id
+        )
+        admin_total_credits = (
+            float(admin_credit.credit if admin_credit else 0)
+            + admin_subscription_credits
+        )
+
+        # 如果管理员积分足够，使用管理员积分检查
+        if admin_total_credits >= minimum_credit:
+            user_id_to_check = group.admin_id
+
     # load credit
     metadata = form_data.get("metadata") or form_data
-    credit = Credits.init_credit_by_user_id(user_id=user_id)
+    credit = Credits.init_credit_by_user_id(user_id=user_id_to_check)
+
+    # 获取套餐积分
+    subscription_credits = SubscriptionCredits.get_total_active_credits(
+        user_id_to_check
+    )
+    total_credits = float(credit.credit if credit else 0) + subscription_credits
+
     # check for credit
-    if credit is None or credit.credit <= 0 or credit.credit < minimum_credit:
+    if credit is None or total_credits <= 0 or total_credits < minimum_credit:
         if isinstance(metadata, dict) and metadata:
             chat_id = metadata.get("chat_id")
             message_id = metadata.get("message_id") or metadata.get("id")
