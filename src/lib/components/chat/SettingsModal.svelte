@@ -55,6 +55,67 @@
 			]
 		},
 		{
+			id: 'account',
+			title: 'Account',
+			keywords: [
+				'account',
+				'profile',
+				'security',
+				'privacy',
+				'settings',
+				'login',
+				'useraccount',
+				'userdata',
+				'api',
+				'apikey',
+				'userprofile',
+				'profiledetails',
+				'accountsettings',
+				'accountpreferences',
+				'securitysettings',
+				'privacysettings'
+			]
+		},
+		{
+			id: 'credit',
+			title: 'Credit',
+			keywords: ['credit']
+		},
+		{
+			id: 'chats',
+			title: 'Chats',
+			keywords: [
+				'chat',
+				'messages',
+				'conversations',
+				'chatsettings',
+				'history',
+				'chathistory',
+				'messagehistory',
+				'messagearchive',
+				'convo',
+				'chats',
+				'conversationhistory',
+				'exportmessages',
+				'chatactivity'
+			]
+		},
+		{
+			id: 'personalization',
+			title: 'Personalization',
+			keywords: [
+				'personalization',
+				'memory',
+				'personalize',
+				'preferences',
+				'profile',
+				'personalsettings',
+				'customsettings',
+				'userpreferences',
+				'accountpreferences'
+			]
+		},
+		{
 			id: 'interface',
 			title: 'Interface',
 			keywords: [
@@ -147,21 +208,6 @@
 			: []),
 
 		{
-			id: 'personalization',
-			title: 'Personalization',
-			keywords: [
-				'personalization',
-				'memory',
-				'personalize',
-				'preferences',
-				'profile',
-				'personalsettings',
-				'customsettings',
-				'userpreferences',
-				'accountpreferences'
-			]
-		},
-		{
 			id: 'audio',
 			title: 'Audio',
 			keywords: [
@@ -206,52 +252,7 @@
 				'voicemodes'
 			]
 		},
-		{
-			id: 'chats',
-			title: 'Chats',
-			keywords: [
-				'chat',
-				'messages',
-				'conversations',
-				'chatsettings',
-				'history',
-				'chathistory',
-				'messagehistory',
-				'messagearchive',
-				'convo',
-				'chats',
-				'conversationhistory',
-				'exportmessages',
-				'chatactivity'
-			]
-		},
-		{
-			id: 'account',
-			title: 'Account',
-			keywords: [
-				'account',
-				'profile',
-				'security',
-				'privacy',
-				'settings',
-				'login',
-				'useraccount',
-				'userdata',
-				'api',
-				'apikey',
-				'userprofile',
-				'profiledetails',
-				'accountsettings',
-				'accountpreferences',
-				'securitysettings',
-				'privacysettings'
-			]
-		},
-		{
-			id: 'credit',
-			title: 'Credit',
-			keywords: ['credit']
-		},
+
 		{
 			id: 'admin',
 			title: 'Admin',
@@ -454,31 +455,34 @@
 								<div class=" self-center">{$i18n.t('General')}</div>
 							</button>
 						{:else if tabId === 'interface'}
-							<button
-								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-								'interface'
-									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-								on:click={() => {
-									selectedTab = 'interface';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 16 16"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											fill-rule="evenodd"
-											d="M2 4.25A2.25 2.25 0 0 1 4.25 2h7.5A2.25 2.25 0 0 1 14 4.25v5.5A2.25 2.25 0 0 1 11.75 12h-1.312c.1.128.21.248.328.36a.75.75 0 0 1 .234.545v.345a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-.345a.75.75 0 0 1 .234-.545c.118-.111.228-.232.328-.36H4.25A2.25 2.25 0 0 1 2 9.75v-5.5Zm2.25-.75a.75.75 0 0 0-.75.75v4.5c0 .414.336.75.75.75h7.5a.75.75 0 0 0 .75-.75v-4.5a.75.75 0 0 0-.75-.75h-7.5Z"
-											clip-rule="evenodd"
-										/>
-									</svg>
-								</div>
-								<div class=" self-center">{$i18n.t('Interface')}</div>
-							</button>
+							{#if $user?.role === 'admin'}
+								<!-- 界面 -->
+								<button
+									class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+									'interface'
+										? ''
+										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									on:click={() => {
+										selectedTab = 'interface';
+									}}
+								>
+									<div class=" self-center mr-2">
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												fill-rule="evenodd"
+												d="M2 4.25A2.25 2.25 0 0 1 4.25 2h7.5A2.25 2.25 0 0 1 14 4.25v5.5A2.25 2.25 0 0 1 11.75 12h-1.312c.1.128.21.248.328.36a.75.75 0 0 1 .234.545v.345a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-.345a.75.75 0 0 1 .234-.545c.118-.111.228-.232.328-.36H4.25A2.25 2.25 0 0 1 2 9.75v-5.5Zm2.25-.75a.75.75 0 0 0-.75.75v4.5c0 .414.336.75.75.75h7.5a.75.75 0 0 0 .75-.75v-4.5a.75.75 0 0 0-.75-.75h-7.5Z"
+												clip-rule="evenodd"
+											/>
+										</svg>
+									</div>
+									<div class=" self-center">{$i18n.t('Interface')}</div>
+								</button>
+							{/if}
 						{:else if tabId === 'connections'}
 							{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
 								{#if false}
@@ -551,32 +555,34 @@
 								<div class=" self-center">{$i18n.t('Personalization')}</div>
 							</button>
 						{:else if tabId === 'audio'}
-							<button
-								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-								'audio'
-									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-								on:click={() => {
-									selectedTab = 'audio';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 16 16"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											d="M7.557 2.066A.75.75 0 0 1 8 2.75v10.5a.75.75 0 0 1-1.248.56L3.59 11H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.59l3.162-2.81a.75.75 0 0 1 .805-.124ZM12.95 3.05a.75.75 0 1 0-1.06 1.06 5.5 5.5 0 0 1 0 7.78.75.75 0 1 0 1.06 1.06 7 7 0 0 0 0-9.9Z"
-										/>
-										<path
-											d="M10.828 5.172a.75.75 0 1 0-1.06 1.06 2.5 2.5 0 0 1 0 3.536.75.75 0 1 0 1.06 1.06 4 4 0 0 0 0-5.656Z"
-										/>
-									</svg>
-								</div>
-								<div class=" self-center">{$i18n.t('Audio')}</div>
-							</button>
+							{#if $user?.role === 'admin'}
+								<button
+									class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+									'audio'
+										? ''
+										: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+									on:click={() => {
+										selectedTab = 'audio';
+									}}
+								>
+									<div class=" self-center mr-2">
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M7.557 2.066A.75.75 0 0 1 8 2.75v10.5a.75.75 0 0 1-1.248.56L3.59 11H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.59l3.162-2.81a.75.75 0 0 1 .805-.124ZM12.95 3.05a.75.75 0 1 0-1.06 1.06 5.5 5.5 0 0 1 0 7.78.75.75 0 1 0 1.06 1.06 7 7 0 0 0 0-9.9Z"
+											/>
+											<path
+												d="M10.828 5.172a.75.75 0 1 0-1.06 1.06 2.5 2.5 0 0 1 0 3.536.75.75 0 1 0 1.06 1.06 4 4 0 0 0 0-5.656Z"
+											/>
+										</svg>
+									</div>
+									<div class=" self-center">{$i18n.t('Audio')}</div>
+								</button>
+							{/if}
 						{:else if tabId === 'chats'}
 							<button
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
@@ -603,32 +609,6 @@
 								</div>
 								<div class=" self-center">{$i18n.t('Chats')}</div>
 							</button>
-						{:else if tabId === 'account'}
-							<button
-								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
-								'account'
-									? ''
-									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-								on:click={() => {
-									selectedTab = 'account';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 16 16"
-										fill="currentColor"
-										class="w-4 h-4"
-									>
-										<path
-											fill-rule="evenodd"
-											d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-5-2a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 9c-1.825 0-3.422.977-4.295 2.437A5.49 5.49 0 0 0 8 13.5a5.49 5.49 0 0 0 4.294-2.063A4.997 4.997 0 0 0 8 9Z"
-											clip-rule="evenodd"
-										/>
-									</svg>
-								</div>
-								<div class=" self-center">{$i18n.t('Account')}</div>
-							</button>
 						{:else if tabId === 'credit'}
 							<button
 								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
@@ -654,6 +634,32 @@
 									</svg>
 								</div>
 								<div class=" self-center">{$i18n.t('Credit')}</div>
+							</button>
+						{:else if tabId === 'account'}
+							<button
+								class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+								'account'
+									? ''
+									: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+								on:click={() => {
+									selectedTab = 'account';
+								}}
+							>
+								<div class=" self-center mr-2">
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 16 16"
+										fill="currentColor"
+										class="w-4 h-4"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-5-2a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 9c-1.825 0-3.422.977-4.295 2.437A5.49 5.49 0 0 0 8 13.5a5.49 5.49 0 0 0 4.294-2.063A4.997 4.997 0 0 0 8 9Z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</div>
+								<div class=" self-center">{$i18n.t('Account')}</div>
 							</button>
 						{:else if tabId === 'about'}
 							<div>
@@ -711,6 +717,7 @@
 											/>
 										</svg>
 									</div>
+									<!-- 管理员设置 -->
 									<div class=" self-center">{$i18n.t('Admin Settings')}</div>
 								</button>
 							{/if}
