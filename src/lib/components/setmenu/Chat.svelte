@@ -266,9 +266,7 @@
 										<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
 									</div>
 									<div class="text-xl font-bold mb-2 text-black">
-										{menu.credits * 31}V豆<span class="text-base font-normal text-gray-500"
-											>/月</span
-										>
+										{menu.credits * 31}V豆<span class="text-base font-normal text-gray-500"></span>
 									</div>
 
 									<div class="text-gray-500 text-sm mb-4 max-h-[280px] overflow-auto">
