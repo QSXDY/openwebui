@@ -4,7 +4,7 @@
 
 	import { user, config, settings } from '$lib/stores';
 	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
-
+	import Credit from './Credit.svelte';
 	import UpdatePassword from './Account/UpdatePassword.svelte';
 	import { getGravatarUrl } from '$lib/apis/utils';
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
@@ -247,7 +247,7 @@
 					</div>
 				</div>
 			</div>
-
+			<Credit />
 			<!-- {#if $config?.features?.enable_user_webhooks} -->
 			{#if false}
 				<div class="pt-2">

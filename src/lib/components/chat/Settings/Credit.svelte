@@ -200,20 +200,23 @@
 			config = res;
 		}
 
-		credit = $user?.credit ? $user?.credit : 0;
+		console.log('cred$user$user--it', $user);
 		tradeInfo = {};
 		document.getElementById('trade-qrcode').innerHTML = '';
 
 		await loadLogs(false);
 	};
 
+	let tradeInfouse = {};
+
 	const doInitadd = async () => {
 		const sessionUser = await getAdminUser(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
+		tradeInfouse = sessionUser;
 		adcredit = sessionUser.admin_credit == null ? null : sessionUser.admin_credit;
-		console.log('企业积分', sessionUser);
+		console.log('企业积分', tradeInfouse);
 	};
 
 	onMount(async () => {
@@ -224,13 +227,30 @@
 
 <div class="flex flex-col h-full justify-between text-sm">
 	<div class=" space-y-3 lg:max-h-full">
+		{#if adcredit !== null}
+			<!-- 使用Svelte规范的{#if}语法，全等判断 -->
+			<div class="pt-0.5">
+				<div class="flex flex-col w-full">
+					<div class=" mb-1 text-xs font-medium">所属企业</div>
+
+					<div class="flex-1 flex items-center">
+						{tradeInfouse.group_name}
+						<div
+							class="text-xs ml-2 flex items-center font-bold h-[20px] bg-green-500/20 text-green-700 dark:text-green-200 w-fit px-2 rounded-sm uppercase line-clamp-1 mr-0.5"
+						>
+							{$user.id === tradeInfouse.admin_id ? '企业管理员' : '企业成员'}
+						</div>
+					</div>
+				</div>
+			</div>
+		{/if}
 		<div class="space-y-1">
 			<div class="flex">
 				<div class="pt-0.5 mr-5">
 					<div class="flex flex-col w-full">
 						<div class="mb-1 text-base font-medium">个人{$i18n.t('Credit')}</div>
 						<div class="flex items-center">
-							<div>{credit}</div>
+							<div>{credit == '0E-12' ? 0 : credit}</div>
 							<button class="ml-1" on:click={() => doInit()}>
 								<svg
 									viewBox="0 0 1024 1024"
@@ -251,12 +271,12 @@
 					<!-- 使用Svelte规范的{#if}语法，全等判断 -->
 					<div class="pt-0.5">
 						<div class="flex flex-col w-full">
-							<div class="mb-1 text-base font-medium">
+							<div class="mb-1 flex items-center text-base font-medium">
 								企业{$i18n.t('Credit')}
 								<!-- 保留原有i18n翻译 -->
 							</div>
 							<div class="flex items-center">
-								<div>{adcredit}</div>
+								<div>{adcredit == '0E-12' ? 0 : adcredit}</div>
 								<button class="ml-1" on:click={doInitadd}>
 									<svg
 										viewBox="0 0 1024 1024"
