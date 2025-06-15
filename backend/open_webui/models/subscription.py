@@ -439,10 +439,6 @@ class SubscriptionsTable:
                 plan = db.query(Plan).filter(Plan.id == plan_id).first()
                 if not plan:
                     raise HTTPException(status_code=404, detail="套餐不存在")
-
-                start_date = int(time.time())
-                end_date = start_date + duration_days * 86400
-
                 # 检查是否为续费（同一套餐的活跃订阅）
                 existing_subscription = (
                     db.query(Subscription)
@@ -456,19 +452,17 @@ class SubscriptionsTable:
                 )
 
                 if existing_subscription:
-                    # 续费逻辑：先扣除剩余积分，再添加新积分
-                    expire_result = SubscriptionCredits.expire_subscription_credits(
-                        user_id, existing_subscription.id
+                    extend_result = Subscriptions.extend_subscription(
+                        existing_subscription.id, plan.duration
                     )
-
-                    # 更新订阅结束时间
-                    existing_subscription.end_date = end_date
-                    existing_subscription.updated_at = int(time.time())
-                    subscription_id = existing_subscription.id
 
                     # 创建新的套餐积分记录
                     SubscriptionCredits.create_subscription_credit(
-                        user_id, subscription_id, plan_id, plan.credits, duration_days
+                        user_id,
+                        existing_subscription.id,
+                        plan_id,
+                        plan.credits,
+                        duration_days,
                     )
 
                     # 添加新的套餐积分到用户总积分
@@ -478,19 +472,19 @@ class SubscriptionsTable:
                         SetCreditFormDetail,
                     )
 
+                    # 添加新的套餐积分
                     Credits.add_credit_by_user_id(
                         AddCreditForm(
                             user_id=user_id,
-                            amount=Decimal(plan.credits),
+                            amount=Decimal(plan.credits * plan.duration),
                             detail=SetCreditFormDetail(
-                                desc=f"套餐续费积分发放 - 套餐: {plan.name} ({duration_days}天)",
+                                desc=f"套餐续费积分发放 - 套餐: {plan.name}",
                                 api_params={
-                                    "subscription_id": subscription_id,
+                                    "subscription_id": existing_subscription.id,
                                     "plan_id": plan_id,
                                     "is_renewal": True,
-                                    "deducted_credits": expire_result.get(
-                                        "deducted_credits", 0
-                                    ),
+                                    "deducted_credits": 0,
+                                    "extend_result": extend_result,
                                 },
                                 usage={
                                     "subscription_renewal": True,
@@ -499,8 +493,25 @@ class SubscriptionsTable:
                             ),
                         )
                     )
+                    db.commit()
+
+                    return {
+                        "success": True,
+                        "subscription": {
+                            "id": existing_subscription.id,
+                            "user_id": user_id,
+                            "plan_id": plan_id,
+                            "status": "active",
+                            "start_date": existing_subscription.start_date,
+                            "end_date": existing_subscription.end_date,
+                            "credits_granted": plan.credits,
+                            "is_renewal": existing_subscription is not None,
+                        },
+                    }
                 else:
                     # 新订阅
+                    start_date = int(time.time())
+                    end_date = start_date + duration_days * 86400
                     subscription_id = str(uuid.uuid4())
                     new_subscription = Subscription(
                         id=subscription_id,
@@ -527,9 +538,9 @@ class SubscriptionsTable:
                     Credits.add_credit_by_user_id(
                         AddCreditForm(
                             user_id=user_id,
-                            amount=Decimal(plan.credits),
+                            amount=Decimal(plan.credits * plan.duration),
                             detail=SetCreditFormDetail(
-                                desc=f"套餐订阅积分发放 - 套餐: {plan.name} ({duration_days}天)",
+                                desc=f"套餐订阅积分发放 - 套餐: {plan.name}",
                                 api_params={
                                     "subscription_id": subscription_id,
                                     "plan_id": plan_id,
@@ -543,21 +554,21 @@ class SubscriptionsTable:
                         )
                     )
 
-                db.commit()
+                    db.commit()
 
-                return {
-                    "success": True,
-                    "subscription": {
-                        "id": subscription_id,
-                        "user_id": user_id,
-                        "plan_id": plan_id,
-                        "status": "active",
-                        "start_date": start_date,
-                        "end_date": end_date,
-                        "credits_granted": plan.credits,
-                        "is_renewal": existing_subscription is not None,
-                    },
-                }
+                    return {
+                        "success": True,
+                        "subscription": {
+                            "id": subscription_id,
+                            "user_id": user_id,
+                            "plan_id": plan_id,
+                            "status": "active",
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "credits_granted": plan.credits,
+                            "is_renewal": existing_subscription is not None,
+                        },
+                    }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -613,6 +624,81 @@ class SubscriptionsTable:
                 ]
         except Exception:
             return []
+
+    def update_subscription(self, subscription_id: str, **kwargs) -> Dict[str, Any]:
+        """修改订阅信息"""
+        try:
+            with get_db() as db:
+                subscription = (
+                    db.query(Subscription)
+                    .filter(Subscription.id == subscription_id)
+                    .first()
+                )
+
+                if not subscription:
+                    raise HTTPException(status_code=404, detail="订阅不存在")
+
+                # 更新允许的字段
+                allowed_fields = ["end_date", "status", "plan_id"]
+                updated_fields = {}
+
+                for field, value in kwargs.items():
+                    if field in allowed_fields and hasattr(subscription, field):
+                        setattr(subscription, field, value)
+                        updated_fields[field] = value
+
+                # 更新修改时间
+                subscription.updated_at = int(time.time())
+                updated_fields["updated_at"] = subscription.updated_at
+
+                db.commit()
+                db.refresh(subscription)
+
+                return {
+                    "success": True,
+                    "subscription_id": subscription_id,
+                    "updated_fields": updated_fields,
+                    "message": "订阅信息更新成功",
+                }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def extend_subscription(
+        self, subscription_id: str, extend_days: int
+    ) -> Dict[str, Any]:
+        """延长订阅时间"""
+        try:
+            with get_db() as db:
+                subscription = (
+                    db.query(Subscription)
+                    .filter(Subscription.id == subscription_id)
+                    .first()
+                )
+
+                if not subscription:
+                    raise HTTPException(status_code=404, detail="订阅不存在")
+
+                # 计算新的过期时间
+                original_end_date = subscription.end_date
+                new_end_date = original_end_date + (extend_days * 86400)
+
+                # 更新过期时间
+                subscription.end_date = new_end_date
+                subscription.updated_at = int(time.time())
+
+                db.commit()
+                db.refresh(subscription)
+
+                return {
+                    "success": True,
+                    "subscription_id": subscription_id,
+                    "original_end_date": original_end_date,
+                    "new_end_date": new_end_date,
+                    "extended_days": extend_days,
+                    "message": f"订阅已延长 {extend_days} 天",
+                }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 Subscriptions = SubscriptionsTable()
@@ -839,14 +925,14 @@ class RedeemCodesTable:
                     end_date=end_date,
                     status="active",
                 )
-                db.add(subscription)
+                # db.add(subscription)
 
                 db.query(RedeemCode).filter(RedeemCode.code == code).update(
                     {"is_used": True, "used_by": user_id, "used_at": start_date}
                 )
 
                 db.commit()
-                return SubscriptionModel.model_validate(subscription), "兑换成功"
+                return subscription, "兑换成功"
         except Exception as e:
             return None, f"处理异常: {str(e)}"
 

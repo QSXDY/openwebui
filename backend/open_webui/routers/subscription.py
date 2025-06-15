@@ -172,6 +172,128 @@ async def purchase_subscription(
             plan_id=plan_id,
             credits=plan.credits,  # 添加积分信息
         )
+
+        # 查找支付记录
+        payment = Payments.get_payment(callback_data["out_trade_no"])
+        if not payment:
+            # 尝试查找旧的积分支付记录
+            ticket = TradeTickets.get_ticket_by_id(callback_data["out_trade_no"])
+            if not ticket:
+                return "no payment record found"
+
+            # 如果是旧的积分支付记录，按原来的方式处理
+            if ticket.detail.get("callback"):
+                return "success"
+
+            ticket.detail["callback"] = callback_data
+            TradeTickets.update_credit_by_id(ticket.id, ticket.detail)
+            return "success"
+
+        # 已经处理过的回调
+        if payment.status != "pending":
+            return "success"
+
+        # 更新支付状态
+        payment.status = "completed"
+        payment.transaction_id = callback_data.get("transaction_id")
+        payment.updated_at = int(datetime.datetime.now().timestamp())
+        Payments.update_payment(payment.id, payment)
+
+        # 根据支付类型处理后续逻辑
+        if payment.payment_type == "credits":
+            # 给用户增加积分
+            Credits.add_credit_by_user_id(
+                user_id=payment.user_id,
+                amount=Decimal(payment.credits),
+                detail={
+                    "desc": f"购买积分 {payment.credits}",
+                    "payment_id": payment.id,
+                },
+            )
+
+        elif payment.payment_type == "subscription":
+            # 处理套餐订阅
+            plan = Plans.get_plan_by_id(payment.plan_id)
+            if not plan:
+                log.error(f"找不到套餐: {payment.plan_id}")
+                return "success"
+
+            # 创建订阅
+            now = int(datetime.datetime.now().timestamp())
+            subscription_id = str(uuid.uuid4())
+            subscription = {
+                "id": subscription_id,
+                "user_id": payment.user_id,
+                "plan_id": payment.plan_id,
+                "start_date": now,
+                "end_date": now + (plan.duration * 86400),
+                "status": "active",
+            }
+            Subscriptions.subscribe_user(subscription)
+            # 直接添加完整的套餐积分（而不是使用每日积分发放）
+            from open_webui.models.credits import (
+                Credits,
+                AddCreditForm,
+                SetCreditFormDetail,
+            )
+
+            # 在兑换码逻辑中添加续费检查
+            with get_db() as db:
+                # 检查是否为续费（同一套餐的活跃订阅）
+                existing_subscription = (
+                    db.query(Subscription)
+                    .filter(
+                        Subscription.user_id == user.id,
+                        Subscription.plan_id == subscription.plan_id,
+                        Subscription.status == "active",
+                        Subscription.end_date > int(time.time()),
+                    )
+                    .first()
+                )
+
+                if existing_subscription:
+                    # 续费逻辑：先扣除剩余积分
+                    from open_webui.models.subscription import SubscriptionCredits
+
+                    expire_result = SubscriptionCredits.expire_subscription_credits(
+                        user.id, existing_subscription.id
+                    )
+
+                    # 延长订阅时间
+                    existing_subscription.end_date += plan.duration * 86400
+
+                    # 添加新的套餐积分（不需要乘以31）
+                    Credits.add_credit_by_user_id(
+                        AddCreditForm(
+                            user_id=user.id,
+                            amount=Decimal(plan.credits * plan.duration),  # 移除*31
+                            detail=SetCreditFormDetail(
+                                desc=f"兑换码续费积分发放 - 套餐: {plan.name}",
+                                api_params={
+                                    "subscription_id": subscription.id,
+                                    "plan_id": subscription.plan_id,
+                                    "redeem_code": True,
+                                    "is_renewal": True,
+                                    "deducted_credits": expire_result.get(
+                                        "deducted_credits", 0
+                                    ),
+                                },
+                                usage={
+                                    "redeem_renewal": True,
+                                    "credits_granted": plan.credits,
+                                },
+                            ),
+                        )
+                    )
+                else:
+                    # 新订阅逻辑（当前的实现，但移除*31）
+                    Credits.add_credit_by_user_id(
+                        AddCreditForm(
+                            user_id=user.id,
+                            amount=Decimal(plan.credits * plan.duration),  # 移除*31
+                            # ... 其他参数
+                        )
+                    )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -433,33 +555,20 @@ async def redeem_code(
         if not subscription:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
-        from open_webui.models.subscription import (
-            DailyCreditGrants,
-        )
+        # 将 SubscriptionModel 对象转换为字典
+        subscription_data = {
+            "user_id": subscription.user_id,
+            "plan_id": subscription.plan_id,
+            "duration_days": (subscription.end_date - subscription.start_date) // 86400,
+        }
 
-        plan = Plans.get_plan_by_id(subscription.plan_id)
-        if not plan:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="关联的套餐不存在",
-            )
-        # 发放积分
-        grant = DailyCreditGrants.grant_daily_credits(
-            user_id=user.id,
-            subscription_id=subscription.id,
-            plan_id=subscription.plan_id,
-            credits_amount=plan.credits,
-        )
+        # 调用 subscribe_user 方法
+        result = Subscriptions.subscribe_user(subscription_data)
 
-        if not grant:
-            raise HTTPException(
-                status_code=400,
-                detail="今日已发放过积分或发放失败",
-            )
         return {
             "success": True,
             "data": {
-                "subscription": subscription.model_dump(),
+                "subscription": subscription,
                 "new_expiry": datetime.fromtimestamp(subscription.end_date).isoformat(),
             },
             "message": "兑换成功",

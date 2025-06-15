@@ -17,7 +17,6 @@ from open_webui.models.credits import (
     CreditLogSimpleModel,
     CreditLogs,
 )
-from open_webui.utils.payment import handle_payment_callback
 from open_webui.models.models import Models, ModelPriceForm
 from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import get_current_user, get_admin_user
@@ -98,28 +97,138 @@ async def create_ticket(
 
 @router.get("/callback", response_class=PlainTextResponse)
 async def ticket_callback(request: Request) -> str:
-    callback = dict(request.query_params)
-    if not ezfp_client.verify(callback):
+    """
+    统一的支付回调处理函数
+    """
+
+    callback_data = request.query_params
+    if not ezfp_client.verify(callback_data):
         return "invalid signature"
 
-    # payment failed
-    if callback["trade_status"] != "TRADE_SUCCESS":
+    # 支付失败
+    if callback_data["trade_status"] != "TRADE_SUCCESS":
         return "success"
 
-    handle_payment_callback(callback)
-    # find ticket
-    ticket = TradeTickets.get_ticket_by_id(callback["out_trade_no"])
-    if not ticket:
-        return "no ticket fount"
+    # 查找支付记录
+    payment = Payments.get_payment(callback_data["out_trade_no"])
+    if not payment:
+        # 尝试查找旧的积分支付记录
+        ticket = TradeTickets.get_ticket_by_id(callback_data["out_trade_no"])
+        if not ticket:
+            return "no payment record found"
 
-    # already callback
-    if ticket.detail.get("callback"):
+        # 如果是旧的积分支付记录，按原来的方式处理
+        if ticket.detail.get("callback"):
+            return "success"
+
+        ticket.detail["callback"] = callback_data
+        TradeTickets.update_credit_by_id(ticket.id, ticket.detail)
         return "success"
 
-    ticket.detail["callback"] = callback
-    TradeTickets.update_credit_by_id(ticket.id, ticket.detail)
+    # 已经处理过的回调
+    if payment.status != "pending":
+        return "success"
 
-    return "success"
+    # 更新支付状态
+    payment.status = "completed"
+    payment.transaction_id = callback_data.get("transaction_id")
+    payment.updated_at = int(datetime.datetime.now().timestamp())
+    Payments.update_payment(payment.id, payment)
+
+    # 根据支付类型处理后续逻辑
+    if payment.payment_type == "credits":
+        # 给用户增加积分
+        Credits.add_credit_by_user_id(
+            user_id=payment.user_id,
+            amount=Decimal(payment.credits),
+            detail={"desc": f"购买积分 {payment.credits}", "payment_id": payment.id},
+        )
+
+    elif payment.payment_type == "subscription":
+        # 处理套餐订阅
+        plan = Plans.get_plan_by_id(payment.plan_id)
+        if not plan:
+            log.error(f"找不到套餐: {payment.plan_id}")
+            return "success"
+
+        # 创建订阅
+        now = int(datetime.datetime.now().timestamp())
+        subscription_id = str(uuid.uuid4())
+        subscription = {
+            "id": subscription_id,
+            "user_id": payment.user_id,
+            "plan_id": payment.plan_id,
+            "start_date": now,
+            "end_date": now + (plan.duration * 86400),
+            "status": "active",
+        }
+        Subscriptions.subscribe_user(subscription)
+        # 直接添加完整的套餐积分（而不是使用每日积分发放）
+        from open_webui.models.credits import (
+            Credits,
+            AddCreditForm,
+            SetCreditFormDetail,
+        )
+
+        # 在兑换码逻辑中添加续费检查
+        with get_db() as db:
+            # 检查是否为续费（同一套餐的活跃订阅）
+            existing_subscription = (
+                db.query(Subscription)
+                .filter(
+                    Subscription.user_id == user.id,
+                    Subscription.plan_id == subscription.plan_id,
+                    Subscription.status == "active",
+                    Subscription.end_date > int(time.time()),
+                )
+                .first()
+            )
+
+            if existing_subscription:
+                # 续费逻辑：先扣除剩余积分
+                from open_webui.models.subscription import SubscriptionCredits
+
+                expire_result = SubscriptionCredits.expire_subscription_credits(
+                    user.id, existing_subscription.id
+                )
+
+                # 延长订阅时间
+                existing_subscription.end_date += plan.duration * 86400
+
+                # 添加新的套餐积分（不需要乘以31）
+                Credits.add_credit_by_user_id(
+                    AddCreditForm(
+                        user_id=user.id,
+                        amount=Decimal(plan.credits * plan.duration),  # 移除*31
+                        detail=SetCreditFormDetail(
+                            desc=f"兑换码续费积分发放 - 套餐: {plan.name}",
+                            api_params={
+                                "subscription_id": subscription.id,
+                                "plan_id": subscription.plan_id,
+                                "redeem_code": True,
+                                "is_renewal": True,
+                                "deducted_credits": expire_result.get(
+                                    "deducted_credits", 0
+                                ),
+                            },
+                            usage={
+                                "redeem_renewal": True,
+                                "credits_granted": plan.credits,
+                            },
+                        ),
+                    )
+                )
+            else:
+                # 新订阅逻辑（当前的实现，但移除*31）
+                Credits.add_credit_by_user_id(
+                    AddCreditForm(
+                        user_id=user.id,
+                        amount=Decimal(plan.credits * plan.duration),  # 移除*31
+                        # ... 其他参数
+                    )
+                )
+
+    return {"success"}
 
 
 @router.get("/callback/redirect", response_class=RedirectResponse)
