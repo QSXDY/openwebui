@@ -93,7 +93,7 @@ async def create_payment(
                 "end_date": now + (plan.duration * 86400),
                 "status": "active",
             }
-            Subscriptions.subscribe_user(subscription)
+            # Subscriptions.subscribe_user(subscription)
             # 新订阅逻辑
 
     else:

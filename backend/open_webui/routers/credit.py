@@ -22,6 +22,7 @@ from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import get_current_user, get_admin_user
 from open_webui.utils.credit.ezfp import ezfp_client
 from open_webui.utils.models import get_all_models
+from open_webui.models.subscription import Payments, Subscriptions, Plans
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -160,74 +161,10 @@ async def ticket_callback(request: Request) -> str:
             "plan_id": payment.plan_id,
             "start_date": now,
             "end_date": now + (plan.duration * 86400),
+            "duration": plan.duration,
             "status": "active",
         }
         Subscriptions.subscribe_user(subscription)
-        # 直接添加完整的套餐积分（而不是使用每日积分发放）
-        from open_webui.models.credits import (
-            Credits,
-            AddCreditForm,
-            SetCreditFormDetail,
-        )
-
-        # 在兑换码逻辑中添加续费检查
-        with get_db() as db:
-            # 检查是否为续费（同一套餐的活跃订阅）
-            existing_subscription = (
-                db.query(Subscription)
-                .filter(
-                    Subscription.user_id == user.id,
-                    Subscription.plan_id == subscription.plan_id,
-                    Subscription.status == "active",
-                    Subscription.end_date > int(time.time()),
-                )
-                .first()
-            )
-
-            if existing_subscription:
-                # 续费逻辑：先扣除剩余积分
-                from open_webui.models.subscription import SubscriptionCredits
-
-                expire_result = SubscriptionCredits.expire_subscription_credits(
-                    user.id, existing_subscription.id
-                )
-
-                # 延长订阅时间
-                existing_subscription.end_date += plan.duration * 86400
-
-                # 添加新的套餐积分（不需要乘以31）
-                Credits.add_credit_by_user_id(
-                    AddCreditForm(
-                        user_id=user.id,
-                        amount=Decimal(plan.credits * plan.duration),  # 移除*31
-                        detail=SetCreditFormDetail(
-                            desc=f"兑换码续费积分发放 - 套餐: {plan.name}",
-                            api_params={
-                                "subscription_id": subscription.id,
-                                "plan_id": subscription.plan_id,
-                                "redeem_code": True,
-                                "is_renewal": True,
-                                "deducted_credits": expire_result.get(
-                                    "deducted_credits", 0
-                                ),
-                            },
-                            usage={
-                                "redeem_renewal": True,
-                                "credits_granted": plan.credits,
-                            },
-                        ),
-                    )
-                )
-            else:
-                # 新订阅逻辑（当前的实现，但移除*31）
-                Credits.add_credit_by_user_id(
-                    AddCreditForm(
-                        user_id=user.id,
-                        amount=Decimal(plan.credits * plan.duration),  # 移除*31
-                        # ... 其他参数
-                    )
-                )
-
     return {"success"}
 
 
