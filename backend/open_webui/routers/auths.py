@@ -60,7 +60,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.webhook import post_webhook
 from open_webui.utils.access_control import get_permissions
 
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from ssl import CERT_REQUIRED, PROTOCOL_TLS
 
@@ -89,19 +89,23 @@ sms_verification_codes = {}
 
 # 短信服务配置类
 class SMSConfig:
-    def __init__(self):
-        # 从环境变量或配置文件获取，这里为演示使用硬编码
-        self.ACCESS_KEY_ID = 'LTAI5tGP9srZhzbdfzCmKpyX'
-        self.ACCESS_KEY_SECRET = 'IKqnww2tm63btaCCASo8nutSsKGtVC'
-        self.SIGN_NAME = '为兹科技发展'
-        self.TEMPLATE_CODE = 'SMS_298006018'
-        self.ENDPOINT = 'dysmsapi.aliyuncs.com'
-
-sms_config = SMSConfig()
+    def __init__(self, request):
+        self.ACCESS_KEY_ID = request.app.state.config.SMS_ACCESS_KEY_ID
+        self.ACCESS_KEY_SECRET = request.app.state.config.SMS_ACCESS_KEY_SECRET
+        self.SIGN_NAME = request.app.state.config.SMS_SIGN_NAME
+        self.TEMPLATE_CODE = request.app.state.config.SMS_TEMPLATE_CODE
+        self.ENDPOINT = request.app.state.config.SMS_ENDPOINT
 
 # 短信相关的Pydantic模型
 class SendSMSForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
+    type: Literal["login", "register"] = Field(..., description="验证码类型: login-登录, register-注册")
+
+class SMSRegisterForm(BaseModel):
+    phone_number: str = Field(..., description="手机号码")
+    verification_code: str = Field(..., description="验证码")
+    password: str = Field(..., description="密码")
+    name: str = Field(..., description="用户名")
 
 class SMSLoginForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
@@ -110,12 +114,13 @@ class SMSLoginForm(BaseModel):
 # 短信服务类
 class SMSService:
     @staticmethod
-    def create_client() -> Optional[DysmsapiClient]:
+    def create_client(request: Request) -> Optional[DysmsapiClient]:
         """创建短信服务客户端"""
         if not SMS_AVAILABLE:
             return None
         
         try:
+            sms_config = SMSConfig(request)
             config = open_api_models.Config(
                 access_key_id=sms_config.ACCESS_KEY_ID,
                 access_key_secret=sms_config.ACCESS_KEY_SECRET,
@@ -129,17 +134,18 @@ class SMSService:
             return None
 
     @staticmethod
-    def send_verification_sms(phone_number: str, code: str) -> bool:
+    def send_verification_sms(request: Request, phone_number: str, code: str) -> bool:
         """发送验证码短信"""
         if not SMS_AVAILABLE:
             log.error("短信SDK不可用")
             return False
         
         try:
-            client = SMSService.create_client()
+            client = SMSService.create_client(request)
             if not client:
                 return False
             
+            sms_config = SMSConfig(request)
             request = dysmsapi_models.SendSmsRequest(
                 phone_numbers=phone_number,
                 sign_name=sms_config.SIGN_NAME,
@@ -173,21 +179,26 @@ def validate_phone_number(phone: str) -> bool:
     pattern = r'^1[3-9]\d{9}$'
     return bool(re.match(pattern, phone))
 
-def store_verification_code(phone: str, code: str, expire_minutes: int = 5):
+def store_verification_code(phone: str, code: str, type: str, expire_minutes: int = 5):
     """存储验证码（生产环境建议使用Redis）"""
     expire_time = time.time() + (expire_minutes * 60)
     sms_verification_codes[phone] = {
         'code': code,
+        'type': type,
         'expire_time': expire_time,
         'attempts': 0
     }
 
-def verify_code(phone: str, code: str) -> bool:
+def verify_code(phone: str, code: str, type: str) -> bool:
     """验证验证码"""
     if phone not in sms_verification_codes:
         return False
     
     stored_data = sms_verification_codes[phone]
+    
+    # 检查类型是否匹配
+    if stored_data['type'] != type:
+        return False
     
     # 检查是否过期
     if time.time() > stored_data['expire_time']:
@@ -279,7 +290,7 @@ async def get_session_user(
 ############################
 
 @router.post("/sms/send")
-async def send_sms_verification(form_data: SendSMSForm):
+async def send_sms_verification(request: Request, form_data: SendSMSForm):
     """发送短信验证码"""
     if not SMS_AVAILABLE:
         raise HTTPException(
@@ -296,6 +307,16 @@ async def send_sms_verification(form_data: SendSMSForm):
             detail="手机号格式不正确"
         )
     
+    # 如果是登录验证码，检查手机号是否已注册
+    if form_data.type == "login":
+        email = f"{phone_number}@sms.local"
+        user = Users.get_user_by_email(email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号尚未注册"
+            )
+    
     # 检查是否频繁发送（1分钟内只能发送一次）
     if phone_number in sms_verification_codes:
         stored_data = sms_verification_codes[phone_number]
@@ -309,9 +330,9 @@ async def send_sms_verification(form_data: SendSMSForm):
     verification_code = generate_verification_code()
     
     # 发送短信
-    if SMSService.send_verification_sms(phone_number, verification_code):
+    if SMSService.send_verification_sms(request, phone_number, verification_code):
         # 存储验证码
-        store_verification_code(phone_number, verification_code)
+        store_verification_code(phone_number, verification_code, form_data.type)
         
         return {
             "success": True,
@@ -324,9 +345,107 @@ async def send_sms_verification(form_data: SendSMSForm):
             detail="短信发送失败，请稍后重试"
         )
 
-############################
-# 短信验证码登录
-############################
+@router.post("/sms/register", response_model=SessionUserResponse)
+async def sms_register(request: Request, response: Response, form_data: SMSRegisterForm):
+    """短信验证码注册"""
+    phone_number = form_data.phone_number.strip()
+    verification_code = form_data.verification_code.strip()
+    
+    # 验证手机号格式
+    if not validate_phone_number(phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手机号格式不正确"
+        )
+    
+    # 验证验证码
+    if not verify_code(phone_number, verification_code, "register"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="验证码错误或已过期"
+        )
+    
+    # 检查手机号是否已注册
+    email = f"{phone_number}@sms.local"
+    if Users.get_user_by_email(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该手机号已注册"
+        )
+    
+    try:
+        user_count = Users.get_num_users()
+        role = "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
+        
+        # 创建新用户
+        hashed = get_password_hash(form_data.password)
+        user = Auths.insert_new_auth(
+            email=email,
+            password=hashed,
+            name=form_data.name,
+            role=role,
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=ERROR_MESSAGES.CREATE_USER_ERROR
+            )
+            
+    except Exception as err:
+        log.error(f"短信注册创建用户失败: {str(err)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="用户创建失败"
+        )
+    
+    # 生成JWT令牌
+    expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+    expires_at = None
+    if expires_delta:
+        expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+    token = create_token(
+        data={"id": user.id},
+        expires_delta=expires_delta,
+    )
+
+    datetime_expires_at = (
+        datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+        if expires_at
+        else None
+    )
+
+    # 设置Cookie
+    response.set_cookie(
+        key="token",
+        value=token,
+        expires=datetime_expires_at,
+        httponly=True,
+        samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+        secure=WEBUI_AUTH_COOKIE_SECURE,
+    )
+
+    # 获取用户权限
+    user_permissions = get_permissions(
+        user.id, request.app.state.config.USER_PERMISSIONS
+    )
+
+    # 初始化用户积分
+    credit = Credits.init_credit_by_user_id(user.id)
+
+    return {
+        "token": token,
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "profile_image_url": user.profile_image_url,
+        "permissions": user_permissions,
+        "credit": credit.credit,
+    }
 
 @router.post("/sms/signin", response_model=SessionUserResponse)
 async def sms_signin(request: Request, response: Response, form_data: SMSLoginForm):
@@ -342,41 +461,21 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
         )
     
     # 验证验证码
-    if not verify_code(phone_number, verification_code):
+    if not verify_code(phone_number, verification_code, "login"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="验证码错误或已过期"
         )
     
-    # 查找用户（使用手机号作为邮箱的一部分）
+    # 查找用户
     email = f"{phone_number}@sms.local"
     user = Users.get_user_by_email(email)
     
-    # 如果用户不存在，自动创建
     if not user:
-        try:
-            user_count = Users.get_num_users()
-            role = "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-            
-            user = Auths.insert_new_auth(
-                email=email,
-                password=str(uuid.uuid4()),  # 随机密码，因为使用短信登录
-                name=f"用户{phone_number[-4:]}",  # 使用手机号后4位作为默认用户名
-                role=role,
-            )
-            
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=ERROR_MESSAGES.CREATE_USER_ERROR
-                )
-                
-        except Exception as err:
-            log.error(f"短信登录创建用户失败: {str(err)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="用户创建失败"
-            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该手机号尚未注册"
+        )
     
     # 生成JWT令牌
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
@@ -1057,6 +1156,12 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "CUSTOM_SVG": request.app.state.config.CUSTOM_SVG,
         # 网站深色模式 LOGO，PNG 格式
         "CUSTOM_DARK_PNG": request.app.state.config.CUSTOM_DARK_PNG,
+        # 添加短信服务配置
+        "SMS_ACCESS_KEY_ID": request.app.state.config.SMS_ACCESS_KEY_ID,
+        "SMS_ACCESS_KEY_SECRET": request.app.state.config.SMS_ACCESS_KEY_SECRET,
+        "SMS_SIGN_NAME": request.app.state.config.SMS_SIGN_NAME,
+        "SMS_TEMPLATE_CODE": request.app.state.config.SMS_TEMPLATE_CODE,
+        "SMS_ENDPOINT": request.app.state.config.SMS_ENDPOINT,
     }
 
 
@@ -1093,6 +1198,12 @@ class AdminConfig(BaseModel):
     CUSTOM_SVG: str
     # 网站深色模式 LOGO，PNG 格式
     CUSTOM_DARK_PNG: str
+    # 添加短信服务配置
+    SMS_ACCESS_KEY_ID: str = Field(default="")
+    SMS_ACCESS_KEY_SECRET: str = Field(default="")
+    SMS_SIGN_NAME: str = Field(default="")
+    SMS_TEMPLATE_CODE: str = Field(default="")
+    SMS_ENDPOINT: str = Field(default="dysmsapi.aliyuncs.com")
 
 
 @router.post("/admin/config")
@@ -1150,6 +1261,12 @@ async def update_admin_config(
     request.app.state.config.CUSTOM_SVG = form_data.CUSTOM_SVG
     # 网站深色模式 LOGO，PNG 格式
     request.app.state.config.CUSTOM_DARK_PNG = form_data.CUSTOM_DARK_PNG
+    # 添加短信服务配置
+    request.app.state.config.SMS_ACCESS_KEY_ID = form_data.SMS_ACCESS_KEY_ID
+    request.app.state.config.SMS_ACCESS_KEY_SECRET = form_data.SMS_ACCESS_KEY_SECRET
+    request.app.state.config.SMS_SIGN_NAME = form_data.SMS_SIGN_NAME
+    request.app.state.config.SMS_TEMPLATE_CODE = form_data.SMS_TEMPLATE_CODE
+    request.app.state.config.SMS_ENDPOINT = form_data.SMS_ENDPOINT
 
     get_license_data(
         request.app,
@@ -1193,6 +1310,12 @@ async def update_admin_config(
         "CUSTOM_SVG": request.app.state.config.CUSTOM_SVG,
         # 网站深色模式 LOGO，PNG 格式
         "CUSTOM_DARK_PNG": request.app.state.config.CUSTOM_DARK_PNG,
+        # 添加短信服务配置
+        "SMS_ACCESS_KEY_ID": request.app.state.config.SMS_ACCESS_KEY_ID,
+        "SMS_ACCESS_KEY_SECRET": request.app.state.config.SMS_ACCESS_KEY_SECRET,
+        "SMS_SIGN_NAME": request.app.state.config.SMS_SIGN_NAME,
+        "SMS_TEMPLATE_CODE": request.app.state.config.SMS_TEMPLATE_CODE,
+        "SMS_ENDPOINT": request.app.state.config.SMS_ENDPOINT,
     }
 
 

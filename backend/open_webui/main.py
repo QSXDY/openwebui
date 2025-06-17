@@ -376,6 +376,12 @@ from open_webui.config import (
     CUSTOM_DARK_PNG,
     USAGE_CALCULATE_MINIMUM_COST,
     EZFP_PAY_PRIORITY,
+    # SMS Service
+    SMS_ACCESS_KEY_ID,
+    SMS_ACCESS_KEY_SECRET,
+    SMS_SIGN_NAME,
+    SMS_TEMPLATE_CODE,
+    SMS_ENDPOINT,
 )
 from open_webui.env import (
     AUDIT_EXCLUDED_PATHS,
@@ -986,6 +992,17 @@ app.state.config.EZFP_PID = EZFP_PID
 app.state.config.EZFP_KEY = EZFP_KEY
 app.state.config.EZFP_CALLBACK_HOST = EZFP_CALLBACK_HOST
 app.state.config.EZFP_AMOUNT_CONTROL = EZFP_AMOUNT_CONTROL
+
+########################################
+#
+# SMS Service
+########################################
+
+app.state.config.SMS_ACCESS_KEY_ID = SMS_ACCESS_KEY_ID
+app.state.config.SMS_ACCESS_KEY_SECRET = SMS_ACCESS_KEY_SECRET
+app.state.config.SMS_SIGN_NAME = SMS_SIGN_NAME
+app.state.config.SMS_TEMPLATE_CODE = SMS_TEMPLATE_CODE
+app.state.config.SMS_ENDPOINT = SMS_ENDPOINT
 
 ########################################
 #

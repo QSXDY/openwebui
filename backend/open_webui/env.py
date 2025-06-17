@@ -389,6 +389,16 @@ WEBUI_AUTH_COOKIE_SECURE = (
     == "true"
 )
 
+####################################
+# SMS Service
+####################################
+
+SMS_ACCESS_KEY_ID = os.environ.get("SMS_ACCESS_KEY_ID", "")
+SMS_ACCESS_KEY_SECRET = os.environ.get("SMS_ACCESS_KEY_SECRET", "")
+SMS_SIGN_NAME = os.environ.get("SMS_SIGN_NAME", "")
+SMS_TEMPLATE_CODE = os.environ.get("SMS_TEMPLATE_CODE", "")
+SMS_ENDPOINT = os.environ.get("SMS_ENDPOINT", "dysmsapi.aliyuncs.com")
+
 if WEBUI_AUTH and WEBUI_SECRET_KEY == "":
     raise ValueError(ERROR_MESSAGES.ENV_VAR_NOT_FOUND)
 

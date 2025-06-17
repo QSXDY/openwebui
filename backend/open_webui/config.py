@@ -2945,3 +2945,44 @@ EZFP_AMOUNT_CONTROL = PersistentConfig(
     "credit.ezfp.amount_control",
     os.environ.get("EZFP_AMOUNT_CONTROL", ""),
 )
+
+WEBUI_AUTH_COOKIE_SECURE = (
+    os.environ.get("WEBUI_AUTH_COOKIE_SECURE", "false").lower() == "true"
+)
+
+####################################
+# SMS Service
+####################################
+
+SMS_ACCESS_KEY_ID = PersistentConfig(
+    "SMS_ACCESS_KEY_ID",
+    "sms.access_key_id",
+    os.environ.get("SMS_ACCESS_KEY_ID", ""),
+)
+
+SMS_ACCESS_KEY_SECRET = PersistentConfig(
+    "SMS_ACCESS_KEY_SECRET",
+    "sms.access_key_secret",
+    os.environ.get("SMS_ACCESS_KEY_SECRET", ""),
+)
+
+SMS_SIGN_NAME = PersistentConfig(
+    "SMS_SIGN_NAME",
+    "sms.sign_name",
+    os.environ.get("SMS_SIGN_NAME", ""),
+)
+
+SMS_TEMPLATE_CODE = PersistentConfig(
+    "SMS_TEMPLATE_CODE",
+    "sms.template_code",
+    os.environ.get("SMS_TEMPLATE_CODE", ""),
+)
+
+SMS_ENDPOINT = PersistentConfig(
+    "SMS_ENDPOINT",
+    "sms.endpoint",
+    os.environ.get("SMS_ENDPOINT", "dysmsapi.aliyuncs.com"),
+)
+
+if WEBUI_AUTH and WEBUI_SECRET_KEY == "":
+    log.warning("WEBUI_AUTH is enabled but WEBUI_SECRET_KEY is not set.")
