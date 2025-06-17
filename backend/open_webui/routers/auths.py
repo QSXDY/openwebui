@@ -70,6 +70,7 @@ try:
     from alibabacloud_tea_openapi import models as open_api_models
     from alibabacloud_dysmsapi20170525 import models as dysmsapi_models
     from alibabacloud_tea_util import models as util_models
+
     SMS_AVAILABLE = True
 except ImportError:
     SMS_AVAILABLE = False
@@ -87,6 +88,7 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 # 短信验证码存储（生产环境建议使用Redis）
 sms_verification_codes = {}
 
+
 # 短信服务配置类
 class SMSConfig:
     def __init__(self, request):
@@ -96,10 +98,14 @@ class SMSConfig:
         self.TEMPLATE_CODE = request.app.state.config.SMS_TEMPLATE_CODE
         self.ENDPOINT = request.app.state.config.SMS_ENDPOINT
 
+
 # 短信相关的Pydantic模型
 class SendSMSForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
-    type: Literal["login", "register"] = Field(..., description="验证码类型: login-登录, register-注册")
+    type: Literal["login", "register"] = Field(
+        ..., description="验证码类型: login-登录, register-注册"
+    )
+
 
 class SMSRegisterForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
@@ -107,9 +113,11 @@ class SMSRegisterForm(BaseModel):
     password: str = Field(..., description="密码")
     name: str = Field(..., description="用户名")
 
+
 class SMSLoginForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
     verification_code: str = Field(..., description="验证码")
+
 
 # 短信服务类
 class SMSService:
@@ -118,13 +126,13 @@ class SMSService:
         """创建短信服务客户端"""
         if not SMS_AVAILABLE:
             return None
-        
+
         try:
             sms_config = SMSConfig(request)
             config = open_api_models.Config(
                 access_key_id=sms_config.ACCESS_KEY_ID,
                 access_key_secret=sms_config.ACCESS_KEY_SECRET,
-                endpoint=sms_config.ENDPOINT
+                endpoint=sms_config.ENDPOINT,
             )
             config.connect_timeout = 5000
             config.read_timeout = 10000
@@ -139,82 +147,86 @@ class SMSService:
         if not SMS_AVAILABLE:
             log.error("短信SDK不可用")
             return False
-        
+
         try:
             client = SMSService.create_client(request)
             if not client:
                 return False
-            
+
             sms_config = SMSConfig(request)
             request = dysmsapi_models.SendSmsRequest(
                 phone_numbers=phone_number,
                 sign_name=sms_config.SIGN_NAME,
                 template_code=sms_config.TEMPLATE_CODE,
-                template_param=json.dumps({"code": code})
+                template_param=json.dumps({"code": code}),
             )
-            
+
             runtime = util_models.RuntimeOptions()
             runtime.autoretry = True
             runtime.max_attempts = 3
-            
+
             response = client.send_sms_with_options(request, runtime)
-            
+
             if response.body.code == "OK":
                 log.info(f"短信发送成功，手机号: {phone_number}")
                 return True
             else:
                 log.error(f"短信发送失败: {response.body.message}")
                 return False
-                
+
         except Exception as e:
             log.error(f"发送短信异常: {str(e)}")
             return False
+
 
 def generate_verification_code() -> str:
     """生成6位数字验证码"""
     return str(random.randint(100000, 999999))
 
+
 def validate_phone_number(phone: str) -> bool:
     """验证手机号格式"""
-    pattern = r'^1[3-9]\d{9}$'
+    pattern = r"^1[3-9]\d{9}$"
     return bool(re.match(pattern, phone))
+
 
 def store_verification_code(phone: str, code: str, type: str, expire_minutes: int = 5):
     """存储验证码（生产环境建议使用Redis）"""
     expire_time = time.time() + (expire_minutes * 60)
     sms_verification_codes[phone] = {
-        'code': code,
-        'type': type,
-        'expire_time': expire_time,
-        'attempts': 0
+        "code": code,
+        "type": type,
+        "expire_time": expire_time,
+        "attempts": 0,
     }
+
 
 def verify_code(phone: str, code: str, type: str) -> bool:
     """验证验证码"""
     if phone not in sms_verification_codes:
         return False
-    
+
     stored_data = sms_verification_codes[phone]
-    
+
     # 检查类型是否匹配
-    if stored_data['type'] != type:
+    if stored_data["type"] != type:
         return False
-    
+
     # 检查是否过期
-    if time.time() > stored_data['expire_time']:
+    if time.time() > stored_data["expire_time"]:
         del sms_verification_codes[phone]
         return False
-    
+
     # 检查尝试次数
-    if stored_data['attempts'] >= 3:
+    if stored_data["attempts"] >= 3:
         del sms_verification_codes[phone]
         return False
-    
+
     # 验证码错误时增加尝试次数
-    if stored_data['code'] != code:
-        stored_data['attempts'] += 1
+    if stored_data["code"] != code:
+        stored_data["attempts"] += 1
         return False
-    
+
     # 验证成功，删除验证码
     del sms_verification_codes[phone]
     return True
@@ -289,94 +301,91 @@ async def get_session_user(
 # 发送短信验证码
 ############################
 
+
 @router.post("/sms/send")
 async def send_sms_verification(request: Request, form_data: SendSMSForm):
     """发送短信验证码"""
     if not SMS_AVAILABLE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="短信服务不可用，请联系管理员"
+            detail="短信服务不可用，请联系管理员",
         )
-    
+
     phone_number = form_data.phone_number.strip()
-    
+
     # 验证手机号格式
     if not validate_phone_number(phone_number):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="手机号格式不正确"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
         )
-    
+
     # 如果是登录验证码，检查手机号是否已注册
     if form_data.type == "login":
         email = f"{phone_number}@sms.local"
         user = Users.get_user_by_email(email)
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该手机号尚未注册"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号尚未注册"
             )
-    
+
     # 检查是否频繁发送（1分钟内只能发送一次）
     if phone_number in sms_verification_codes:
         stored_data = sms_verification_codes[phone_number]
-        if time.time() < stored_data['expire_time'] - 240:  # 5分钟-4分钟=1分钟
+        if time.time() < stored_data["expire_time"] - 240:  # 5分钟-4分钟=1分钟
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="发送过于频繁，请稍后再试"
+                detail="发送过于频繁，请稍后再试",
             )
-    
+
     # 生成验证码
     verification_code = generate_verification_code()
-    
+
     # 发送短信
     if SMSService.send_verification_sms(request, phone_number, verification_code):
         # 存储验证码
         store_verification_code(phone_number, verification_code, form_data.type)
-        
-        return {
-            "success": True,
-            "message": "验证码发送成功",
-            "expire_minutes": 5
-        }
+
+        return {"success": True, "message": "验证码发送成功", "expire_minutes": 5}
     else:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="短信发送失败，请稍后重试"
+            detail="短信发送失败，请稍后重试",
         )
 
+
 @router.post("/sms/register", response_model=SessionUserResponse)
-async def sms_register(request: Request, response: Response, form_data: SMSRegisterForm):
+async def sms_register(
+    request: Request, response: Response, form_data: SMSRegisterForm
+):
     """短信验证码注册"""
     phone_number = form_data.phone_number.strip()
     verification_code = form_data.verification_code.strip()
-    
+
     # 验证手机号格式
     if not validate_phone_number(phone_number):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="手机号格式不正确"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
         )
-    
+
     # 验证验证码
     if not verify_code(phone_number, verification_code, "register"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="验证码错误或已过期"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
         )
-    
+
     # 检查手机号是否已注册
     email = f"{phone_number}@sms.local"
     if Users.get_user_by_email(email):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该手机号已注册"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已注册"
         )
-    
+
     try:
         user_count = Users.get_num_users()
-        role = "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-        
+        role = (
+            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
+        )
+
         # 创建新用户
         hashed = get_password_hash(form_data.password)
         user = Auths.insert_new_auth(
@@ -385,20 +394,19 @@ async def sms_register(request: Request, response: Response, form_data: SMSRegis
             name=form_data.name,
             role=role,
         )
-        
+
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=ERROR_MESSAGES.CREATE_USER_ERROR
+                detail=ERROR_MESSAGES.CREATE_USER_ERROR,
             )
-            
+
     except Exception as err:
         log.error(f"短信注册创建用户失败: {str(err)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="用户创建失败"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="用户创建失败"
         )
-    
+
     # 生成JWT令牌
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
     expires_at = None
@@ -446,37 +454,35 @@ async def sms_register(request: Request, response: Response, form_data: SMSRegis
         "permissions": user_permissions,
         "credit": credit.credit,
     }
+
 
 @router.post("/sms/signin", response_model=SessionUserResponse)
 async def sms_signin(request: Request, response: Response, form_data: SMSLoginForm):
     """短信验证码登录"""
     phone_number = form_data.phone_number.strip()
     verification_code = form_data.verification_code.strip()
-    
+
     # 验证手机号格式
     if not validate_phone_number(phone_number):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="手机号格式不正确"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
         )
-    
+
     # 验证验证码
     if not verify_code(phone_number, verification_code, "login"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="验证码错误或已过期"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
         )
-    
+
     # 查找用户
     email = f"{phone_number}@sms.local"
     user = Users.get_user_by_email(email)
-    
+
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该手机号尚未注册"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号尚未注册"
         )
-    
+
     # 生成JWT令牌
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
     expires_at = None
@@ -524,6 +530,7 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
         "permissions": user_permissions,
         "credit": credit.credit,
     }
+
 
 ############################
 # Update Profile
