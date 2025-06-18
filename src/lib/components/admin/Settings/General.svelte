@@ -562,7 +562,88 @@
 						</div>
 					</div>
 				</div>
+				<div class="mb-3">
+					<div class=" mb-2.5 text-base font-medium">阿里云短信服务</div>
 
+					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">访问密钥ID</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder="请输入访问密钥ID"
+								bind:value={adminConfig.SMS_ACCESS_KEY_ID}
+							/>
+						</div>
+						<!-- <div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t(
+								'Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.'
+							)}
+						</div> -->
+					</div>
+
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">访问密钥</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入访问密钥`}
+								bind:value={adminConfig.SMS_ACCESS_KEY_SECRET}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">短信签名名称</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入短信签名名称`}
+								bind:value={adminConfig.SMS_SIGN_NAME}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">短信模板code</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入短信模板code`}
+								bind:value={adminConfig.SMS_TEMPLATE_CODE}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">API服务接入点地址</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入API服务接入点地址`}
+								bind:value={adminConfig.SMS_ENDPOINT}
+							/>
+						</div>
+					</div>
+				</div>
 				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Features')}</div>
 

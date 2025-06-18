@@ -238,16 +238,14 @@
 	{#if untype === '个人'}
 		<!-- 套餐卡片 -->
 		<div class="max-w-6xl w-full overflow-auto mx-auto">
-			<div class="relative">
+			<div class="flex">
 				<!-- 修复：移除重复的class属性，修正CSS类名 -->
-				<div
-					class="flex flex-nowrap overflow-x-auto scrollbar-none snap-x snap-mandatory gap-4 pb-5 px-1 md:justify-center"
-				>
+				<div class=" flex gap-4 pb-5 px-1 md:justify-center">
 					{#each menus.filter((menu) => menu.is_active) as menu (menu.id)}
-						<div class="flex-shrink-0 w-[300px] snap-center svelte-du15c4">
+						<div class="flex-shrink-0 w-[280px] snap-center svelte-du15c4">
 							<div
-								class="relative bg-white rounded-2xl p-8 flex-1 min-w-[260px] max-w-[280px] flex flex-col items-start border border-gray-200 shadow-md
-							 border border-gray-200 dark:border-gray-800 rounded-xl p-6 h-full flex flex-col relative hover:shadow-lg transition-all duration-300"
+								class=" bg-white flex-1 min-w-[260px] max-w-[280px] items-start border border-gray-200 shadow-md
+							 dark:border-gray-800 rounded-xl p-6 h-full flex flex-col relative hover:shadow-lg transition-all duration-300"
 							>
 								<div class="w-full">
 									{#if menu.user_plan > 0}
@@ -266,7 +264,9 @@
 										<span class="text-base font-normal text-gray-500">/ {menu.duration}天</span>
 									</div>
 									<div class="text-xl font-bold mb-2 text-black">
-										{menu.credits * 31}V豆<span class="text-base font-normal text-gray-500"></span>
+										{menu.credits * menu.duration}V豆<span
+											class="text-base font-normal text-gray-500"
+										></span>
 									</div>
 
 									<div class="text-gray-500 text-sm mb-4 max-h-[280px] overflow-auto">

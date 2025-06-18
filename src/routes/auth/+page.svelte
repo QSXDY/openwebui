@@ -6,7 +6,13 @@
 	import { page } from '$app/stores';
 
 	import { getBackendConfig } from '$lib/apis';
-	import { ldapUserSignIn, getSessionUser, userSignIn, userSignUp } from '$lib/apis/auths';
+	import {
+		ldapUserSignIn,
+		getSessionUser,
+		userSignIn,
+		userSignUp,
+		smsSendsend
+	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -24,10 +30,14 @@
 
 	let name = '';
 	let email = '';
+	let phone = '';
+	let phonecode = '';
 	let password = '';
-
+	let login = 'email';
 	let ldapUsername = '';
-
+	let codetext = '发送验证码';
+	let isCounting = false;
+	let countdown = 60;
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
@@ -70,6 +80,17 @@
 		await setSessionUser(sessionUser);
 	};
 
+	const phoneUpHandler = async () => {
+		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
+
+		await setSessionUser(sessionUser);
+	};
+
 	const ldapSignInHandler = async () => {
 		const sessionUser = await ldapUserSignIn(ldapUsername, password).catch((error) => {
 			toast.error(`${error}`);
@@ -82,9 +103,19 @@
 		if (mode === 'ldap') {
 			await ldapSignInHandler();
 		} else if (mode === 'signin') {
-			await signInHandler();
+			if (login === 'email') {
+				await signInHandler();
+			} else {
+				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+				console.log('手机号登录ldap');
+			}
 		} else {
-			await signUpHandler();
+			if (login === 'email') {
+				await signUpHandler();
+			} else {
+				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+				await phoneUpHandler();
+			}
 		}
 	};
 
@@ -137,6 +168,35 @@
 		}
 	}
 
+	async function sendCode() {
+		console.log('sendCode发送验证码', phone);
+		return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+		const sessionUser = await smsSendsend(phone, mode == 'signup' ? 'register' : 'login').catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
+		if (sessionUser.success) {
+			toast.success(`验证码发送成功，请注意查收。`);
+			setTimeout(() => {
+				isCounting = true;
+				codetext = '已发送';
+				let time = 60;
+				const interval = setInterval(() => {
+					if (time > 0) {
+						codetext = `${time}秒后重试`;
+						time--;
+					} else {
+						codetext = '发送验证码';
+					}
+				});
+			});
+		} else {
+			toast.error(`验证码发送失败，请稍后再试。`);
+		}
+	}
+
 	onMount(async () => {
 		if ($user !== undefined) {
 			const redirectPath = querystringValue('redirect') || '/';
@@ -182,7 +242,7 @@
 						id="logo"
 						crossorigin="anonymous"
 						src="{WEBUI_BASE_URL}/static/splash.png"
-						class=" w-6 rounded-full"
+						class=" w-20 rounded-full"
 						alt=""
 					/>
 				</div>
@@ -209,6 +269,60 @@
 					</div>
 				{:else}
 					<div class="  my-auto pb-10 w-full dark:text-gray-100">
+						<div class="mb-1">
+							<div class=" text-2xl font-medium">
+								{#if $config?.onboarding ?? false}
+									{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+								{:else if mode === 'ldap'}
+									{$i18n.t(`Sign in to {{WEBUI_NAME}} with LDAP`, { WEBUI_NAME: $WEBUI_NAME })}
+								{:else if mode === 'signin'}
+									{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+								{:else}
+									{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+								{/if}
+							</div>
+
+							{#if $config?.onboarding ?? false}
+								<div class="mt-1 text-xs font-medium text-gray-600 dark:text-gray-500">
+									ⓘ {$WEBUI_NAME}
+									{$i18n.t(
+										'does not make any external connections, and your data stays securely on your locally hosted server.'
+									)}
+								</div>
+							{/if}
+						</div>
+						<!-- {#if mode === 'signin'} -->
+						<div class=" flex w-full">
+							<div
+								class="flex gap-1 scrollbar-none w-fit text-center text-base font-medium rounded-full bg-transparent pt-1"
+							>
+								<button
+									on:click={() => (login = 'email')}
+									class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'email'
+										? ''
+										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								>
+									{mode === 'signin' ? $i18n.t('Email login') : '邮箱注册'}
+								</button>
+								<button
+									on:click={() => (login = 'phone')}
+									class="min-w-fit rounded-full p-1.5 pb-0 {login == 'phone'
+										? ''
+										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+									>{mode === 'signin' ? $i18n.t('Phone login') : '手机号注册'}</button
+								>
+								<!-- {#if mode === 'signin'}
+									<button
+										on:click={() => (login = 'wechat')}
+										class="min-w-fit rounded-full p-1.5 pb-0 {login == 'wechat'
+											? ''
+											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+										>{$i18n.t('Wechat login')}</button
+									>
+										{/if} -->
+							</div>
+						</div>
+
 						<form
 							class=" flex flex-col justify-center"
 							on:submit={(e) => {
@@ -216,98 +330,153 @@
 								submitHandler();
 							}}
 						>
-							<div class="mb-1">
-								<div class=" text-2xl font-medium">
-									{#if $config?.onboarding ?? false}
-										{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
-									{:else if mode === 'ldap'}
-										{$i18n.t(`Sign in to {{WEBUI_NAME}} with LDAP`, { WEBUI_NAME: $WEBUI_NAME })}
-									{:else if mode === 'signin'}
-										{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
-									{:else}
-										{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
-									{/if}
-								</div>
-
-								{#if $config?.onboarding ?? false}
-									<div class="mt-1 text-xs font-medium text-gray-600 dark:text-gray-500">
-										ⓘ {$WEBUI_NAME}
-										{$i18n.t(
-											'does not make any external connections, and your data stays securely on your locally hosted server.'
-										)}
-									</div>
-								{/if}
-							</div>
-
 							{#if $config?.features.enable_login_form || $config?.features.enable_ldap}
-								<div class="flex flex-col mt-4">
-									{#if mode === 'signup'}
-										<div class="mb-2">
-											<label for="name" class="text-sm font-medium text-left mb-1 block"
-												>{$i18n.t('Name')}</label
+								{#if login === 'email'}
+									<div class="flex flex-col mt-4">
+										{#if mode === 'signup'}
+											<div class="mb-2">
+												<label for="name" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Name')}</label
+												>
+												<input
+													bind:value={name}
+													type="text"
+													id="name"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													autocomplete="name"
+													placeholder={$i18n.t('Enter Your Full Name')}
+													required
+												/>
+											</div>
+										{/if}
+
+										{#if mode === 'ldap'}
+											<div class="mb-2">
+												<label for="username" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Username')}</label
+												>
+												<input
+													bind:value={ldapUsername}
+													type="text"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													autocomplete="username"
+													name="username"
+													id="username"
+													placeholder={$i18n.t('Enter Your Username')}
+													required
+												/>
+											</div>
+										{:else}
+											<div class="mb-2">
+												<label for="email" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Email')}</label
+												>
+												<input
+													bind:value={email}
+													type="email"
+													id="email"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													autocomplete="email"
+													name="email"
+													placeholder={$i18n.t('Enter Your Email')}
+													required
+												/>
+											</div>
+										{/if}
+
+										<div>
+											<label for="password" class="text-sm font-medium text-left mb-1 block"
+												>{$i18n.t('Password')}</label
 											>
 											<input
-												bind:value={name}
+												bind:value={password}
+												type="password"
+												id="password"
+												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+												placeholder={$i18n.t('Enter Your Password')}
+												autocomplete="current-password"
+												name="current-password"
+												required
+											/>
+										</div>
+									</div>
+								{:else if login === 'phone'}
+									<div class="flex flex-col mt-4">
+										{#if mode === 'signup'}
+											<div class="mb-2">
+												<label for="name" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Name')}</label
+												>
+												<input
+													bind:value={name}
+													type="text"
+													id="name"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													autocomplete="name"
+													placeholder={$i18n.t('Enter Your Full Name')}
+													required
+												/>
+											</div>
+
+											<div>
+												<label for="password" class="text-sm font-medium text-left mb-1 block"
+													>{$i18n.t('Password')}</label
+												>
+												<input
+													bind:value={password}
+													type="password"
+													id="password"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													placeholder={$i18n.t('Enter Your Password')}
+													autocomplete="current-password"
+													name="current-password"
+													required
+												/>
+											</div>
+										{/if}
+										<div class="mb-2">
+											<label for="name" class="text-sm font-medium text-left mb-1 block"
+												>{$i18n.t('Phone')}</label
+											>
+											<input
+												bind:value={phone}
 												type="text"
 												id="name"
 												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
 												autocomplete="name"
-												placeholder={$i18n.t('Enter Your Full Name')}
+												placeholder="请输入您的手机号"
 												required
 											/>
 										</div>
-									{/if}
-
-									{#if mode === 'ldap'}
 										<div class="mb-2">
 											<label for="username" class="text-sm font-medium text-left mb-1 block"
-												>{$i18n.t('Username')}</label
+												>{$i18n.t('Phone Code')}</label
 											>
-											<input
-												bind:value={ldapUsername}
-												type="text"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-												autocomplete="username"
-												name="username"
-												id="username"
-												placeholder={$i18n.t('Enter Your Username')}
-												required
-											/>
+											<div class="flex gap-1">
+												<input
+													bind:value={phonecode}
+													type="text"
+													class="my-0.5 flex-2 w-full text-sm outline-hidden bg-transparent"
+													autocomplete="username"
+													name="username"
+													id="username"
+													placeholder="请输入验证码"
+													required
+												/>
+												<button
+													on:click={sendCode}
+													class="bg-gray-700/5 flex-1 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+													type="button"
+													disabled={isCounting}
+												>
+													{codetext}
+												</button>
+											</div>
 										</div>
-									{:else}
-										<div class="mb-2">
-											<label for="email" class="text-sm font-medium text-left mb-1 block"
-												>{$i18n.t('Email')}</label
-											>
-											<input
-												bind:value={email}
-												type="email"
-												id="email"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-												autocomplete="email"
-												name="email"
-												placeholder={$i18n.t('Enter Your Email')}
-												required
-											/>
-										</div>
-									{/if}
-
-									<div>
-										<label for="password" class="text-sm font-medium text-left mb-1 block"
-											>{$i18n.t('Password')}</label
-										>
-										<input
-											bind:value={password}
-											type="password"
-											id="password"
-											class="my-0.5 w-full text-sm outline-hidden bg-transparent"
-											placeholder={$i18n.t('Enter Your Password')}
-											autocomplete="current-password"
-											name="current-password"
-											required
-										/>
 									</div>
-								</div>
+								{:else if login === 'wechat'}
+									<div class="flex flex-col mt-4">二维码</div>
+								{/if}
 							{/if}
 							<div class="mt-5">
 								{#if $config?.features.enable_login_form || $config?.features.enable_ldap}
@@ -319,22 +488,29 @@
 											{$i18n.t('Authenticate')}
 										</button>
 									{:else}
-										<button
-											class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
-											type="submit"
-										>
-											{mode === 'signin'
-												? $i18n.t('Sign in')
-												: ($config?.onboarding ?? false)
-													? $i18n.t('Create Admin Account')
-													: $i18n.t('Create Account')}
-										</button>
-
+										{#if login !== 'wechat'}
+											<button
+												class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												type="submit"
+											>
+												{mode === 'signin'
+													? $i18n.t('Sign in')
+													: ($config?.onboarding ?? false)
+														? $i18n.t('Create Admin Account')
+														: $i18n.t('Create Account')}
+											</button>
+										{/if}
 										{#if $config?.features.enable_signup && !($config?.onboarding ?? false)}
 											<div class=" mt-4 text-sm text-center">
-												{mode === 'signin'
-													? $i18n.t("Don't have an account?")
-													: $i18n.t('Already have an account?')}
+												{#if login == 'email'}
+													{mode === 'signin'
+														? $i18n.t("Don't have an account?")
+														: $i18n.t('Already have an account?')}
+												{:else if login != 'email'}
+													{login === 'phone'
+														? '手机号获取验证码进行登录。没有账号？'
+														: '使用微信扫码实现登录。'}
+												{/if}
 
 												<button
 													class=" font-medium underline"

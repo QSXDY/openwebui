@@ -238,14 +238,19 @@
 							<div class="flex flex-col w-full my-2">
 								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('menucredits')}</div>
 
-								<div class="flex-1">
+								<div class="flex-1 flex">
 									<input
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+										class="w-full flex-1 text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 										type="number"
 										bind:value={_user.credits}
 										placeholder={$i18n.t('menucredits_placeholder')}
 										autocomplete="off"
 									/>
+
+									<span class="flex-1 text-sm text-gray-500"
+										>×{_user.duration ?? $i18n.t('menuduration')} = {_user.credits * _user.duration}
+										{$i18n.t('Credit')}</span
+									>
 								</div>
 							</div>
 
