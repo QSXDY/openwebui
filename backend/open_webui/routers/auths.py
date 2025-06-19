@@ -6,6 +6,11 @@ import logging
 import random
 import json
 from decimal import Decimal
+import hashlib
+import urllib.parse
+import qrcode
+from io import BytesIO
+import base64
 
 from aiohttp import ClientSession
 
@@ -119,6 +124,18 @@ class SMSLoginForm(BaseModel):
     verification_code: str = Field(..., description="验证码")
 
 
+# 微信登录相关的Pydantic模型
+class WeChatLoginForm(BaseModel):
+    code: str = Field(..., description="微信授权码")
+    state: str = Field(..., description="状态参数")
+
+
+class WeChatQRResponse(BaseModel):
+    qr_code: str = Field(..., description="二维码图片base64")
+    state: str = Field(..., description="状态参数")
+    expires_in: int = Field(default=600, description="过期时间(秒)")
+
+
 # 短信服务类
 class SMSService:
     @staticmethod
@@ -230,6 +247,128 @@ def verify_code(phone: str, code: str, type: str) -> bool:
     # 验证成功，删除验证码
     del sms_verification_codes[phone]
     return True
+
+
+# 微信登录状态存储（生产环境建议使用Redis）
+wechat_login_states = {}
+
+
+# 微信登录服务类
+class WeChatService:
+    @staticmethod
+    def generate_state() -> str:
+        """生成状态参数"""
+        return hashlib.md5(
+            f"{time.time()}{random.randint(1000, 9999)}".encode()
+        ).hexdigest()
+
+    @staticmethod
+    def generate_qr_code(request: Request) -> WeChatQRResponse:
+        """生成微信登录二维码"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        redirect_uri = request.app.state.config.WECHAT_REDIRECT_URI
+
+        if not app_id or not redirect_uri:
+            raise ValueError("微信配置不完整")
+
+        state = WeChatService.generate_state()
+
+        # 存储state，用于验证
+        wechat_login_states[state] = {
+            "created_at": time.time(),
+            "expires_at": time.time() + 600,  # 10分钟过期
+        }
+
+        # 构建微信授权URL
+        auth_url = (
+            f"https://open.weixin.qq.com/connect/qrconnect?"
+            f"appid={app_id}&"
+            f"redirect_uri={urllib.parse.quote(redirect_uri)}&"
+            f"response_type=code&"
+            f"scope=snsapi_login&"
+            f"state={state}#wechat_redirect"
+        )
+
+        # 生成二维码
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(auth_url)
+        qr.make(fit=True)
+
+        # 创建二维码图片
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        # 转换为base64
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+        return WeChatQRResponse(
+            qr_code=f"data:image/png;base64,{qr_base64}", state=state, expires_in=600
+        )
+
+    @staticmethod
+    async def get_access_token(request: Request, code: str) -> dict:
+        """通过code获取access_token"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        if not app_id or not app_secret:
+            raise ValueError("微信配置不完整")
+
+        url = (
+            f"https://api.weixin.qq.com/sns/oauth2/access_token?"
+            f"appid={app_id}&"
+            f"secret={app_secret}&"
+            f"code={code}&"
+            f"grant_type=authorization_code"
+        )
+
+        async with ClientSession() as session:
+            async with session.get(url) as response:
+                data = await response.json()
+                if "access_token" not in data:
+                    raise ValueError(
+                        f"获取access_token失败: {data.get('errmsg', '未知错误')}"
+                    )
+                return data
+
+    @staticmethod
+    async def get_user_info(access_token: str, openid: str) -> dict:
+        """获取用户信息"""
+        url = (
+            f"https://api.weixin.qq.com/sns/userinfo?"
+            f"access_token={access_token}&"
+            f"openid={openid}"
+        )
+
+        async with ClientSession() as session:
+            async with session.get(url) as response:
+                data = await response.json()
+                if "openid" not in data:
+                    raise ValueError(
+                        f"获取用户信息失败: {data.get('errmsg', '未知错误')}"
+                    )
+                return data
+
+    @staticmethod
+    def validate_state(state: str) -> bool:
+        """验证state参数"""
+        if state not in wechat_login_states:
+            return False
+
+        state_data = wechat_login_states[state]
+        if time.time() > state_data["expires_at"]:
+            del wechat_login_states[state]
+            return False
+
+        # 验证成功后删除state
+        del wechat_login_states[state]
+        return True
 
 
 ############################
@@ -530,6 +669,159 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
         "permissions": user_permissions,
         "credit": credit.credit,
     }
+
+
+############################
+# 微信扫码登录
+############################
+
+
+@router.get("/wechat/qr")
+async def get_wechat_qr_code(request: Request):
+    """获取微信登录二维码"""
+    if not request.app.state.config.ENABLE_WECHAT_LOGIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="微信登录服务未启用"
+        )
+
+    try:
+        qr_response = WeChatService.generate_qr_code(request)
+        return {"success": True, "data": qr_response.dict()}
+    except Exception as e:
+        log.error(f"生成微信登录二维码失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"生成二维码失败: {str(e)}",
+        )
+
+
+@router.post("/wechat/login", response_model=SessionUserResponse)
+async def wechat_login(
+    request: Request, response: Response, form_data: WeChatLoginForm
+):
+    """微信登录"""
+    if not request.app.state.config.ENABLE_WECHAT_LOGIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="微信登录服务未启用"
+        )
+
+    try:
+        # 验证state参数
+        if not WeChatService.validate_state(form_data.state):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无效的state参数或已过期",
+            )
+
+        # 通过code获取access_token
+        token_data = await WeChatService.get_access_token(request, form_data.code)
+        access_token = token_data["access_token"]
+        openid = token_data["openid"]
+
+        # 获取用户信息
+        user_info = await WeChatService.get_user_info(access_token, openid)
+
+        # 使用openid作为唯一标识
+        email = f"{openid}@wechat.local"
+
+        # 查找或创建用户
+        user = Users.get_user_by_email(email)
+
+        if not user:
+            # 创建新用户
+            user_count = Users.get_num_users()
+            role = (
+                "admin"
+                if user_count == 0
+                else request.app.state.config.DEFAULT_USER_ROLE
+            )
+
+            # 使用微信昵称作为用户名，如果为空则使用默认名称
+            nickname = user_info.get("nickname", "微信用户")
+            profile_image_url = user_info.get("headimgurl", "")
+
+            user = Auths.insert_new_auth(
+                email=email,
+                password=str(uuid.uuid4()),  # 随机密码，微信用户不使用密码登录
+                name=nickname,
+                role=role,
+                profile_image_url=profile_image_url,
+            )
+
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="创建用户失败",
+                )
+
+        # 生成JWT令牌
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+        token = create_token(
+            data={"id": user.id},
+            expires_delta=expires_delta,
+        )
+
+        datetime_expires_at = (
+            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+            if expires_at
+            else None
+        )
+
+        # 设置Cookie
+        response.set_cookie(
+            key="token",
+            value=token,
+            expires=datetime_expires_at,
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
+
+        # 获取用户权限
+        user_permissions = get_permissions(
+            user.id, request.app.state.config.USER_PERMISSIONS
+        )
+
+        # 初始化用户积分
+        credit = Credits.init_credit_by_user_id(user.id)
+
+        return {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_at": expires_at,
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "profile_image_url": user.profile_image_url,
+            "permissions": user_permissions,
+            "credit": credit.credit,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"微信登录失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"登录失败: {str(e)}",
+        )
+
+
+@router.get("/wechat/check/{state}")
+async def check_wechat_login_status(state: str):
+    """检查微信登录状态（用于前端轮询）"""
+    if state in wechat_login_states:
+        state_data = wechat_login_states[state]
+        if time.time() > state_data["expires_at"]:
+            del wechat_login_states[state]
+            return {"status": "expired"}
+        return {"status": "waiting"}
+    return {"status": "not_found"}
 
 
 ############################
@@ -1169,6 +1461,11 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "SMS_SIGN_NAME": request.app.state.config.SMS_SIGN_NAME,
         "SMS_TEMPLATE_CODE": request.app.state.config.SMS_TEMPLATE_CODE,
         "SMS_ENDPOINT": request.app.state.config.SMS_ENDPOINT,
+        # 添加微信登录配置
+        "ENABLE_WECHAT_LOGIN": request.app.state.config.ENABLE_WECHAT_LOGIN,
+        "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
+        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
+        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 
@@ -1211,6 +1508,11 @@ class AdminConfig(BaseModel):
     SMS_SIGN_NAME: str = Field(default="")
     SMS_TEMPLATE_CODE: str = Field(default="")
     SMS_ENDPOINT: str = Field(default="dysmsapi.aliyuncs.com")
+    # 添加微信登录配置
+    ENABLE_WECHAT_LOGIN: bool = Field(default=False)
+    WECHAT_APP_ID: str = Field(default="")
+    WECHAT_APP_SECRET: str = Field(default="")
+    WECHAT_REDIRECT_URI: str = Field(default="")
 
 
 @router.post("/admin/config")
@@ -1274,6 +1576,11 @@ async def update_admin_config(
     request.app.state.config.SMS_SIGN_NAME = form_data.SMS_SIGN_NAME
     request.app.state.config.SMS_TEMPLATE_CODE = form_data.SMS_TEMPLATE_CODE
     request.app.state.config.SMS_ENDPOINT = form_data.SMS_ENDPOINT
+    # 添加微信登录配置
+    request.app.state.config.ENABLE_WECHAT_LOGIN = form_data.ENABLE_WECHAT_LOGIN
+    request.app.state.config.WECHAT_APP_ID = form_data.WECHAT_APP_ID
+    request.app.state.config.WECHAT_APP_SECRET = form_data.WECHAT_APP_SECRET
+    request.app.state.config.WECHAT_REDIRECT_URI = form_data.WECHAT_REDIRECT_URI
 
     get_license_data(
         request.app,
@@ -1323,6 +1630,11 @@ async def update_admin_config(
         "SMS_SIGN_NAME": request.app.state.config.SMS_SIGN_NAME,
         "SMS_TEMPLATE_CODE": request.app.state.config.SMS_TEMPLATE_CODE,
         "SMS_ENDPOINT": request.app.state.config.SMS_ENDPOINT,
+        # 添加微信登录配置
+        "ENABLE_WECHAT_LOGIN": request.app.state.config.ENABLE_WECHAT_LOGIN,
+        "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
+        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
+        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 

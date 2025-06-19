@@ -113,6 +113,11 @@ from open_webui.config import (
     OPENAI_API_BASE_URLS,
     OPENAI_API_KEYS,
     OPENAI_API_CONFIGS,
+    # WeChat Login
+    ENABLE_WECHAT_LOGIN,
+    WECHAT_APP_ID,
+    WECHAT_APP_SECRET,
+    WECHAT_REDIRECT_URI,
     # Direct Connections
     ENABLE_DIRECT_CONNECTIONS,
     # Thread pool size for FastAPI/AnyIO
@@ -1003,6 +1008,17 @@ app.state.config.SMS_ACCESS_KEY_SECRET = SMS_ACCESS_KEY_SECRET
 app.state.config.SMS_SIGN_NAME = SMS_SIGN_NAME
 app.state.config.SMS_TEMPLATE_CODE = SMS_TEMPLATE_CODE
 app.state.config.SMS_ENDPOINT = SMS_ENDPOINT
+
+########################################
+#
+# WeChat Login
+#
+########################################
+
+app.state.config.ENABLE_WECHAT_LOGIN = ENABLE_WECHAT_LOGIN
+app.state.config.WECHAT_APP_ID = WECHAT_APP_ID
+app.state.config.WECHAT_APP_SECRET = WECHAT_APP_SECRET
+app.state.config.WECHAT_REDIRECT_URI = WECHAT_REDIRECT_URI
 
 ########################################
 #

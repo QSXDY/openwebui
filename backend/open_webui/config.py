@@ -2984,5 +2984,30 @@ SMS_ENDPOINT = PersistentConfig(
     os.environ.get("SMS_ENDPOINT", "dysmsapi.aliyuncs.com"),
 )
 
-if WEBUI_AUTH and WEBUI_SECRET_KEY == "":
-    log.warning("WEBUI_AUTH is enabled but WEBUI_SECRET_KEY is not set.")
+####################################
+# WeChat Login Service
+####################################
+
+WECHAT_APP_ID = PersistentConfig(
+    "WECHAT_APP_ID",
+    "wechat.app_id",
+    os.environ.get("WECHAT_APP_ID", "wx94f032f804cbd5a6"),
+)
+
+WECHAT_APP_SECRET = PersistentConfig(
+    "WECHAT_APP_SECRET",
+    "wechat.app_secret",
+    os.environ.get("WECHAT_APP_SECRET", "12e6851164f7bcec993f029dd6e1ae1e"),
+)
+
+WECHAT_REDIRECT_URI = PersistentConfig(
+    "WECHAT_REDIRECT_URI",
+    "wechat.redirect_uri",
+    os.environ.get("WECHAT_REDIRECT_URI", "https://vivi.xjrwith.cn/"),
+)
+
+ENABLE_WECHAT_LOGIN = PersistentConfig(
+    "ENABLE_WECHAT_LOGIN",
+    "wechat.enable",
+    os.environ.get("ENABLE_WECHAT_LOGIN", "False").lower() == "true",
+)
