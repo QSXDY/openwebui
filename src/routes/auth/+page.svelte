@@ -508,7 +508,9 @@
 														: $i18n.t('Already have an account?')}
 												{:else if login != 'email'}
 													{login === 'phone'
-														? '手机号获取验证码进行登录。没有账号？'
+														? mode === 'signin'
+															? '手机号获取验证码进行登录。没有账号？'
+															: '已经拥有账号了？'
 														: '使用微信扫码实现登录。'}
 												{/if}
 
