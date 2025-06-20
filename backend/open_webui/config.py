@@ -3009,5 +3009,5 @@ WECHAT_REDIRECT_URI = PersistentConfig(
 ENABLE_WECHAT_LOGIN = PersistentConfig(
     "ENABLE_WECHAT_LOGIN",
     "wechat.enable",
-    os.environ.get("ENABLE_WECHAT_LOGIN", "False").lower() == "true",
+    os.environ.get("ENABLE_WECHAT_LOGIN", "true").lower() == "true",
 )
