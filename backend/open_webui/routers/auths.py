@@ -18,6 +18,7 @@ from open_webui.models.auths import (
     AddUserForm,
     ApiKey,
     Auths,
+    UserBindings,
     Token,
     LdapForm,
     SigninForm,
@@ -107,8 +108,8 @@ class SMSConfig:
 # 短信相关的Pydantic模型
 class SendSMSForm(BaseModel):
     phone_number: str = Field(..., description="手机号码")
-    type: Literal["login", "register"] = Field(
-        ..., description="验证码类型: login-登录, register-注册"
+    type: Literal["login", "register", "bind"] = Field(
+        ..., description="验证码类型: login-登录, register-注册, bind-绑定"
     )
 
 
@@ -126,14 +127,25 @@ class SMSLoginForm(BaseModel):
 
 # 微信登录相关的Pydantic模型
 class WeChatLoginForm(BaseModel):
-    code: str = Field(..., description="微信授权码")
-    state: str = Field(..., description="状态参数")
+    openid: str = Field(..., description="微信openid")
+    scene_id: str = Field(..., description="场景值")
 
 
 class WeChatQRResponse(BaseModel):
     qr_code: str = Field(..., description="二维码图片base64")
-    state: str = Field(..., description="状态参数")
+    scene_id: str = Field(..., description="场景值")
     expires_in: int = Field(default=600, description="过期时间(秒)")
+
+
+# 绑定手机号相关的Pydantic模型
+class BindPhoneForm(BaseModel):
+    phone_number: str = Field(..., description="手机号码")
+    verification_code: str = Field(..., description="验证码")
+
+
+class BindWeChatForm(BaseModel):
+    openid: str = Field(..., description="微信openid")
+    scene_id: str = Field(..., description="场景值")
 
 
 # 短信服务类
@@ -249,126 +261,175 @@ def verify_code(phone: str, code: str, type: str) -> bool:
     return True
 
 
-# 微信登录状态存储（生产环境建议使用Redis）
-wechat_login_states = {}
+# 微信公众号关注登录状态存储（生产环境建议使用Redis）
+wechat_follow_states = {}
 
 
-# 微信登录服务类
-class WeChatService:
+# 微信公众号关注登录服务类
+class WeChatFollowService:
     @staticmethod
-    def generate_state() -> str:
-        """生成状态参数"""
+    def generate_scene_id() -> str:
+        """生成场景值"""
         return hashlib.md5(
             f"{time.time()}{random.randint(1000, 9999)}".encode()
-        ).hexdigest()
+        ).hexdigest()[:8]
 
     @staticmethod
-    def generate_qr_code(request: Request) -> WeChatQRResponse:
-        """生成微信登录二维码"""
-        app_id = request.app.state.config.WECHAT_APP_ID
-        redirect_uri = request.app.state.config.WECHAT_REDIRECT_URI
-
-        if not app_id or not redirect_uri:
-            raise ValueError("微信配置不完整")
-
-        state = WeChatService.generate_state()
-
-        # 存储state，用于验证
-        wechat_login_states[state] = {
-            "created_at": time.time(),
-            "expires_at": time.time() + 600,  # 10分钟过期
-        }
-
-        # 构建微信授权URL
-        auth_url = (
-            f"https://open.weixin.qq.com/connect/qrconnect?"
-            f"appid={app_id}&"
-            f"redirect_uri={urllib.parse.quote(redirect_uri)}&"
-            f"response_type=code&"
-            f"scope=snsapi_login&"
-            f"state={state}#wechat_redirect"
-        )
-
-        # 生成二维码
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(auth_url)
-        qr.make(fit=True)
-
-        # 创建二维码图片
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        # 转换为base64
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        qr_base64 = base64.b64encode(buffer.getvalue()).decode()
-
-        return WeChatQRResponse(
-            qr_code=f"data:image/png;base64,{qr_base64}", state=state, expires_in=600
-        )
-
-    @staticmethod
-    async def get_access_token(request: Request, code: str) -> dict:
-        """通过code获取access_token"""
+    async def create_qrcode_ticket(request: Request, scene_id: str) -> dict:
+        """创建带参数的公众号二维码ticket"""
         app_id = request.app.state.config.WECHAT_APP_ID
         app_secret = request.app.state.config.WECHAT_APP_SECRET
 
         if not app_id or not app_secret:
-            raise ValueError("微信配置不完整")
+            raise ValueError("微信公众号配置不完整")
 
-        url = (
-            f"https://api.weixin.qq.com/sns/oauth2/access_token?"
-            f"appid={app_id}&"
-            f"secret={app_secret}&"
-            f"code={code}&"
-            f"grant_type=authorization_code"
-        )
+        # 获取access_token
+        token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
 
         async with ClientSession() as session:
-            async with session.get(url) as response:
-                data = await response.json()
-                if "access_token" not in data:
+            async with session.get(token_url) as response:
+                token_data = await response.json()
+                if "access_token" not in token_data:
                     raise ValueError(
-                        f"获取access_token失败: {data.get('errmsg', '未知错误')}"
+                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
                     )
-                return data
+
+                access_token = token_data["access_token"]
+
+            # 创建带参数二维码（临时二维码，10分钟过期）
+            qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
+            qr_data = {
+                "expire_seconds": 600,  # 10分钟过期
+                "action_name": "QR_STR_SCENE",
+                "action_info": {"scene": {"scene_str": scene_id}},
+            }
+
+            async with session.post(qr_url, json=qr_data) as response:
+                qr_response = await response.json()
+                if "ticket" not in qr_response:
+                    raise ValueError(
+                        f"创建二维码失败: {qr_response.get('errmsg', '未知错误')}"
+                    )
+
+                return {
+                    "ticket": qr_response["ticket"],
+                    "expire_seconds": qr_response.get("expire_seconds", 600),
+                    "url": qr_response.get("url", ""),
+                }
 
     @staticmethod
-    async def get_user_info(access_token: str, openid: str) -> dict:
-        """获取用户信息"""
-        url = (
-            f"https://api.weixin.qq.com/sns/userinfo?"
-            f"access_token={access_token}&"
-            f"openid={openid}"
-        )
+    async def generate_qr_code(request: Request) -> WeChatQRResponse:
+        """生成微信公众号关注二维码"""
+        scene_id = WeChatFollowService.generate_scene_id()
+
+        # 存储scene_id，用于验证
+        wechat_follow_states[scene_id] = {
+            "created_at": time.time(),
+            "expires_at": time.time() + 600,  # 10分钟过期
+            "status": "waiting",  # waiting, followed, login_success
+        }
+
+        try:
+            # 调用微信API获取真实的ticket
+            qr_data = await WeChatFollowService.create_qrcode_ticket(request, scene_id)
+            ticket = qr_data["ticket"]
+
+            # 直接从微信获取官方二维码图片
+            import urllib.parse
+
+            encoded_ticket = urllib.parse.quote(ticket)
+            qr_image_url = (
+                f"https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket={encoded_ticket}"
+            )
+
+            # 下载微信官方二维码图片
+            async with ClientSession() as session:
+                async with session.get(qr_image_url) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+                        # 转换为base64
+                        qr_base64 = base64.b64encode(image_data).decode()
+
+                        return WeChatQRResponse(
+                            qr_code=f"data:image/jpeg;base64,{qr_base64}",
+                            scene_id=scene_id,
+                            expires_in=qr_data.get("expire_seconds", 600),
+                        )
+                    else:
+                        raise ValueError(
+                            f"获取微信二维码图片失败，状态码: {response.status}"
+                        )
+
+        except Exception as e:
+            log.error(f"生成公众号二维码失败: {str(e)}")
+            raise ValueError(f"生成二维码失败: {str(e)}")
+
+    @staticmethod
+    async def get_wechat_user_info(request: Request, openid: str) -> dict:
+        """获取微信用户信息"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        if not app_id or not app_secret:
+            raise ValueError("微信公众号配置不完整")
+
+        # 获取access_token
+        token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
 
         async with ClientSession() as session:
-            async with session.get(url) as response:
-                data = await response.json()
-                if "openid" not in data:
+            async with session.get(token_url) as response:
+                token_data = await response.json()
+                if "access_token" not in token_data:
                     raise ValueError(
-                        f"获取用户信息失败: {data.get('errmsg', '未知错误')}"
+                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
                     )
-                return data
+
+                access_token = token_data["access_token"]
+
+            # 获取用户信息
+            user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
+
+            async with session.get(user_url) as response:
+                user_data = await response.json()
+                if "openid" not in user_data:
+                    raise ValueError(
+                        f"获取用户信息失败: {user_data.get('errmsg', '未知错误')}"
+                    )
+
+                return user_data
 
     @staticmethod
-    def validate_state(state: str) -> bool:
-        """验证state参数"""
-        if state not in wechat_login_states:
+    def validate_scene_id(scene_id: str) -> bool:
+        """验证场景值"""
+        if scene_id not in wechat_follow_states:
             return False
 
-        state_data = wechat_login_states[state]
+        state_data = wechat_follow_states[scene_id]
         if time.time() > state_data["expires_at"]:
-            del wechat_login_states[state]
+            del wechat_follow_states[scene_id]
             return False
 
-        # 验证成功后删除state
-        del wechat_login_states[state]
         return True
+
+    @staticmethod
+    def mark_followed(scene_id: str, openid: str):
+        """标记用户已关注"""
+        if scene_id in wechat_follow_states:
+            wechat_follow_states[scene_id]["status"] = "followed"
+            wechat_follow_states[scene_id]["openid"] = openid
+
+    @staticmethod
+    def get_follow_status(scene_id: str) -> dict:
+        """获取关注状态"""
+        if scene_id not in wechat_follow_states:
+            return {"status": "not_found"}
+
+        state_data = wechat_follow_states[scene_id]
+        if time.time() > state_data["expires_at"]:
+            del wechat_follow_states[scene_id]
+            return {"status": "expired"}
+
+        return {"status": state_data["status"], "openid": state_data.get("openid")}
 
 
 ############################
@@ -672,57 +733,54 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
 
 
 ############################
-# 微信扫码登录
+# 微信公众号关注登录
 ############################
 
 
 @router.get("/wechat/qr")
-async def get_wechat_qr_code(request: Request):
-    """获取微信登录二维码"""
+async def get_wechat_follow_qr_code(request: Request):
+    """获取微信公众号关注二维码"""
     if not request.app.state.config.ENABLE_WECHAT_LOGIN:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="微信登录服务未启用"
         )
 
     try:
-        qr_response = WeChatService.generate_qr_code(request)
+        qr_response = await WeChatFollowService.generate_qr_code(request)
         return {"success": True, "data": qr_response.dict()}
     except Exception as e:
-        log.error(f"生成微信登录二维码失败: {str(e)}")
+        log.error(f"生成微信关注二维码失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"生成二维码失败: {str(e)}",
         )
 
 
-@router.post("/wechat/login", response_model=SessionUserResponse)
-async def wechat_login(
+@router.post("/wechat/follow-login", response_model=SessionUserResponse)
+async def wechat_follow_login(
     request: Request, response: Response, form_data: WeChatLoginForm
 ):
-    """微信登录"""
+    """微信公众号关注登录"""
     if not request.app.state.config.ENABLE_WECHAT_LOGIN:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="微信登录服务未启用"
         )
 
     try:
-        # 验证state参数
-        if not WeChatService.validate_state(form_data.state):
+        # 验证scene_id参数
+        if not WeChatFollowService.validate_scene_id(form_data.scene_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无效的state参数或已过期",
+                detail="无效的场景值或已过期",
             )
 
-        # 通过code获取access_token
-        token_data = await WeChatService.get_access_token(request, form_data.code)
-        access_token = token_data["access_token"]
-        openid = token_data["openid"]
-
-        # 获取用户信息
-        user_info = await WeChatService.get_user_info(access_token, openid)
+        # 获取微信用户信息
+        user_info = await WeChatFollowService.get_wechat_user_info(
+            request, form_data.openid
+        )
 
         # 使用openid作为唯一标识
-        email = f"{openid}@wechat.local"
+        email = f"{form_data.openid}@wechat.local"
 
         # 查找或创建用户
         user = Users.get_user_by_email(email)
@@ -753,6 +811,11 @@ async def wechat_login(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="创建用户失败",
                 )
+
+        # 检查是否绑定了手机号
+        has_phone = False
+        if "@sms.local" in user.email:
+            has_phone = True
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
@@ -789,7 +852,12 @@ async def wechat_login(
         # 初始化用户积分
         credit = Credits.init_credit_by_user_id(user.id)
 
-        return {
+        # 清理场景值
+        if form_data.scene_id in wechat_follow_states:
+            del wechat_follow_states[form_data.scene_id]
+
+        # 返回结果，包含是否需要绑定手机号的提示
+        result = {
             "token": token,
             "token_type": "Bearer",
             "expires_at": expires_at,
@@ -800,7 +868,10 @@ async def wechat_login(
             "profile_image_url": user.profile_image_url,
             "permissions": user_permissions,
             "credit": credit.credit,
+            "need_bind_phone": not has_phone,  # 是否需要绑定手机号
         }
+
+        return result
 
     except HTTPException:
         raise
@@ -812,16 +883,292 @@ async def wechat_login(
         )
 
 
-@router.get("/wechat/check/{state}")
-async def check_wechat_login_status(state: str):
-    """检查微信登录状态（用于前端轮询）"""
-    if state in wechat_login_states:
-        state_data = wechat_login_states[state]
-        if time.time() > state_data["expires_at"]:
-            del wechat_login_states[state]
-            return {"status": "expired"}
-        return {"status": "waiting"}
-    return {"status": "not_found"}
+@router.post("/wechat/follow-event")
+async def wechat_follow_event(request: Request):
+    """处理微信公众号关注事件（微信服务器回调）"""
+    import xml.etree.ElementTree as ET
+
+    try:
+        # 解析微信推送的XML数据
+        body = await request.body()
+        xml_data = body.decode("utf-8")
+
+        # 解析XML
+        root = ET.fromstring(xml_data)
+
+        # 提取关键信息
+        msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
+        event = root.find("Event").text if root.find("Event") is not None else ""
+        openid = (
+            root.find("FromUserName").text
+            if root.find("FromUserName") is not None
+            else ""
+        )
+        scene_str = (
+            root.find("EventKey").text if root.find("EventKey") is not None else ""
+        )
+
+        # 处理关注事件
+        if msg_type == "event" and event == "subscribe":
+            # 如果是带参数的关注事件，scene_str格式为qrscene_SCENE_STR
+            if scene_str.startswith("qrscene_"):
+                scene_id = scene_str[8:]  # 去掉qrscene_前缀
+                # 标记用户已关注
+                WeChatFollowService.mark_followed(scene_id, openid)
+                log.info(f"用户 {openid} 通过场景值 {scene_id} 关注了公众号")
+            else:
+                log.info(f"用户 {openid} 关注了公众号（无场景值）")
+
+        # 处理扫描事件（已关注用户扫描带参数二维码）
+        elif msg_type == "event" and event == "SCAN":
+            scene_id = scene_str  # 扫描事件直接返回场景值
+            WeChatFollowService.mark_followed(scene_id, openid)
+            log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
+
+        # 微信要求返回success或空字符串表示成功处理
+        return Response(content="success", media_type="text/plain")
+
+    except Exception as e:
+        log.error(f"处理微信关注事件失败: {str(e)}")
+        # 即使处理失败，也要返回success，避免微信重复推送
+        return Response(content="success", media_type="text/plain")
+
+
+@router.get("/wechat/check/{scene_id}")
+async def check_wechat_follow_status(scene_id: str):
+    """检查微信关注状态（用于前端轮询）"""
+    try:
+        status_data = WeChatFollowService.get_follow_status(scene_id)
+        return status_data
+    except Exception as e:
+        log.error(f"检查微信关注状态失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+############################
+# 绑定手机号接口
+############################
+
+
+@router.post("/bind/phone")
+async def bind_phone_number(
+    request: Request, form_data: BindPhoneForm, user=Depends(get_current_user)
+):
+    """绑定手机号"""
+    phone_number = form_data.phone_number.strip()
+    verification_code = form_data.verification_code.strip()
+
+    # 验证手机号格式
+    if not validate_phone_number(phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
+        )
+
+    # 验证验证码
+    if not verify_code(phone_number, verification_code, "bind"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
+        )
+
+    # 检查手机号是否已被其他用户绑定
+    phone_email = f"{phone_number}@sms.local"
+    existing_user = Users.get_user_by_email(phone_email)
+    if existing_user and existing_user.id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已被其他用户绑定"
+        )
+
+    try:
+        # 检查用户当前的登录类型
+        current_login_type = getattr(user, "primary_login_type", "email")
+
+        # 如果是微信用户绑定手机号
+        if "@wechat.local" in user.email or current_login_type == "wechat":
+            # 创建或更新手机号认证记录
+            phone_user = Users.get_user_by_email(phone_email)
+            if not phone_user:
+                # 为微信用户创建手机号登录方式
+                phone_user = Auths.insert_new_auth(
+                    email=phone_email,
+                    password=str(uuid.uuid4()),  # 随机密码，用短信登录
+                    name=user.name,
+                    role=user.role,
+                    profile_image_url=user.profile_image_url,
+                    login_type="phone",
+                    phone_number=phone_number,
+                )
+
+                if not phone_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="绑定失败",
+                    )
+
+                # 创建绑定关系
+                UserBindings.create_binding(
+                    primary_user_id=user.id,
+                    bound_user_id=phone_user.id,
+                    primary_login_type=current_login_type,
+                    bound_login_type="phone",
+                    binding_data={"phone_number": phone_number},
+                )
+
+            # 更新用户信息
+            Users.update_user_by_id(
+                user.id,
+                {
+                    "phone_number": phone_number,
+                    "available_login_types": f"{getattr(user, 'available_login_types', current_login_type)},phone",
+                    "binding_status": {
+                        **getattr(user, "binding_status", {}),
+                        "phone": "active",
+                    },
+                },
+            )
+        else:
+            # 邮箱用户直接更新手机号信息
+            Users.update_user_by_id(
+                user.id,
+                {
+                    "phone_number": phone_number,
+                    "available_login_types": f"{getattr(user, 'available_login_types', 'email')},phone",
+                    "binding_status": {
+                        **getattr(user, "binding_status", {}),
+                        "phone": "active",
+                    },
+                },
+            )
+
+            # 更新认证表的手机号信息
+            Auths.update_auth_binding_info(user.id, "phone", phone_number=phone_number)
+
+        return {"success": True, "message": "手机号绑定成功"}
+
+    except Exception as e:
+        log.error(f"绑定手机号失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="绑定失败"
+        )
+
+
+############################
+# 绑定微信接口
+############################
+
+
+@router.post("/bind/wechat")
+async def bind_wechat(
+    request: Request, form_data: BindWeChatForm, user=Depends(get_current_user)
+):
+    """绑定微信"""
+    openid = form_data.openid.strip()
+    scene_id = form_data.scene_id.strip()
+
+    # 验证场景值
+    if not WeChatFollowService.validate_scene_id(scene_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="无效的场景值或已过期"
+        )
+
+    # 检查微信是否已被其他用户绑定
+    wechat_email = f"{openid}@wechat.local"
+    existing_user = Users.get_user_by_email(wechat_email)
+    if existing_user and existing_user.id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该微信账号已被其他用户绑定"
+        )
+
+    try:
+        # 检查用户当前的登录类型
+        current_login_type = getattr(user, "primary_login_type", "email")
+
+        # 获取微信用户信息
+        user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
+
+        # 如果是手机号或邮箱用户绑定微信
+        if "@sms.local" in user.email or current_login_type in ["phone", "email"]:
+            # 创建微信认证记录
+            wechat_user = Users.get_user_by_email(wechat_email)
+            if not wechat_user:
+                # 为当前用户创建微信登录方式
+                wechat_user = Auths.insert_new_auth(
+                    email=wechat_email,
+                    password=str(uuid.uuid4()),  # 随机密码，用微信登录
+                    name=user.name,
+                    role=user.role,
+                    profile_image_url=user_info.get(
+                        "headimgurl", user.profile_image_url
+                    ),
+                    login_type="wechat",
+                    wechat_openid=openid,
+                    wechat_unionid=user_info.get("unionid"),
+                    auth_metadata=user_info,
+                )
+
+                if not wechat_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="绑定失败",
+                    )
+
+                # 创建绑定关系
+                UserBindings.create_binding(
+                    primary_user_id=user.id,
+                    bound_user_id=wechat_user.id,
+                    primary_login_type=current_login_type,
+                    bound_login_type="wechat",
+                    binding_data={
+                        "openid": openid,
+                        "nickname": user_info.get("nickname"),
+                    },
+                )
+
+            # 更新用户信息
+            Users.update_user_by_id(
+                user.id,
+                {
+                    "wechat_openid": openid,
+                    "wechat_nickname": user_info.get("nickname"),
+                    "available_login_types": f"{getattr(user, 'available_login_types', current_login_type)},wechat",
+                    "binding_status": {
+                        **getattr(user, "binding_status", {}),
+                        "wechat": "active",
+                    },
+                },
+            )
+        else:
+            # 微信用户直接更新绑定信息
+            Users.update_user_by_id(
+                user.id,
+                {
+                    "wechat_nickname": user_info.get("nickname"),
+                    "binding_status": {
+                        **getattr(user, "binding_status", {}),
+                        "wechat": "active",
+                    },
+                },
+            )
+
+            # 更新认证表的微信信息
+            Auths.update_auth_binding_info(
+                user.id,
+                "wechat",
+                wechat_openid=openid,
+                wechat_unionid=user_info.get("unionid"),
+                auth_metadata=user_info,
+            )
+
+        # 清理场景值
+        if scene_id in wechat_follow_states:
+            del wechat_follow_states[scene_id]
+
+        return {"success": True, "message": "微信绑定成功"}
+
+    except Exception as e:
+        log.error(f"绑定微信失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="绑定失败"
+        )
 
 
 ############################

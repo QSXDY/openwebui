@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>微信扫码登录</title>
+    <style>
+        .login-container {
+            text-align: center;
+            margin-top: 50px;
+        }
+        .qrcode {
+            margin: 20px auto;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>欢迎使用微信登录</h1>
+        <div class="qrcode">
+            <a href="/login">
+                <img src="https://open.weixin.qq.com/connect/qrconnect?appid={{ WECHAT_APPID }}&redirect_uri={{ REDIRECT_URI }}&response_type=code&scope=snsapi_login&state=STATE#wechat_redirect" 
+                     alt="微信登录二维码">
+            </a>
+        </div>
+        <p>或 <a href="/login">点击这里</a> 使用微信扫码登录</p>
+    </div>
+</body>
+</html>

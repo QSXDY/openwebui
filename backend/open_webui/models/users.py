@@ -37,6 +37,14 @@ class User(Base):
 
     oauth_sub = Column(Text, unique=True)
 
+    # 新增字段支持绑定功能
+    primary_login_type = Column(String, default="email")  # 主要登录方式
+    available_login_types = Column(String)  # 可用的登录方式，逗号分隔
+    phone_number = Column(String)  # 绑定的手机号
+    wechat_openid = Column(String)  # 绑定的微信openid
+    wechat_nickname = Column(String)  # 微信昵称
+    binding_status = Column(JSONField)  # 各种登录方式的绑定状态
+
 
 class UserSettings(BaseModel):
     ui: Optional[dict] = {}
@@ -60,6 +68,14 @@ class UserModel(BaseModel):
     info: Optional[dict] = None
 
     oauth_sub: Optional[str] = None
+
+    # 新增字段
+    primary_login_type: Optional[str] = "email"
+    available_login_types: Optional[str] = None
+    phone_number: Optional[str] = None
+    wechat_openid: Optional[str] = None
+    wechat_nickname: Optional[str] = None
+    binding_status: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True, extra="allow")
 
@@ -116,6 +132,10 @@ class UsersTable:
         profile_image_url: str = "/user.png",
         role: str = "pending",
         oauth_sub: Optional[str] = None,
+        primary_login_type: str = "email",
+        phone_number: Optional[str] = None,
+        wechat_openid: Optional[str] = None,
+        wechat_nickname: Optional[str] = None,
     ) -> Optional[UserModel]:
         with get_db() as db:
             user = UserModel(
@@ -129,6 +149,12 @@ class UsersTable:
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                     "oauth_sub": oauth_sub,
+                    "primary_login_type": primary_login_type,
+                    "available_login_types": primary_login_type,
+                    "phone_number": phone_number,
+                    "wechat_openid": wechat_openid,
+                    "wechat_nickname": wechat_nickname,
+                    "binding_status": {primary_login_type: "active"},
                 }
             )
             result = User(**user.model_dump())
