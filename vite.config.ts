@@ -41,10 +41,4 @@ export default defineConfig({
 		format: 'es'
 	},
 
-	server: {
-		allowedHosts: [
-		  '926vpmc97476.vicp.fun', // 添加你的主机名
-		  '.vicp.fun' // 或者使用通配符允许所有 vicp.fun 子域名
-		]
-	}
 });
