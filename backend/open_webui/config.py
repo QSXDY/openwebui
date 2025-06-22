@@ -3011,3 +3011,14 @@ ENABLE_WECHAT_LOGIN = PersistentConfig(
     "wechat.enable",
     os.environ.get("ENABLE_WECHAT_LOGIN", "true").lower() == "true",
 )
+
+WECHAT_TOKEN = PersistentConfig(
+    "WECHAT_TOKEN",
+    "wechat.token",
+    os.environ.get("WECHAT_TOKEN", ""),
+)
+WECHAT_AES_KEY = PersistentConfig(
+    "WECHAT_AES_KEY",
+    "wechat.aes_key",
+    os.environ.get("WECHAT_AES_KEY", ""),
+)

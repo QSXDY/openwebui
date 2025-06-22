@@ -118,6 +118,8 @@ from open_webui.config import (
     WECHAT_APP_ID,
     WECHAT_APP_SECRET,
     WECHAT_REDIRECT_URI,
+    WECHAT_TOKEN,
+    WECHAT_AES_KEY,
     # Direct Connections
     ENABLE_DIRECT_CONNECTIONS,
     # Thread pool size for FastAPI/AnyIO
@@ -1019,6 +1021,8 @@ app.state.config.ENABLE_WECHAT_LOGIN = ENABLE_WECHAT_LOGIN
 app.state.config.WECHAT_APP_ID = WECHAT_APP_ID
 app.state.config.WECHAT_APP_SECRET = WECHAT_APP_SECRET
 app.state.config.WECHAT_REDIRECT_URI = WECHAT_REDIRECT_URI
+app.state.config.WECHAT_TOKEN = WECHAT_TOKEN
+app.state.config.WECHAT_AES_KEY = WECHAT_AES_KEY
 
 ########################################
 #
