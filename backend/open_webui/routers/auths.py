@@ -463,7 +463,9 @@ class WeChatFollowService:
     def check_signature(token: str, timestamp: str, nonce: str, signature: str) -> bool:
         """验证微信GET请求签名"""
         if not all([token, timestamp, nonce, signature]):
-            log.error(f"微信签名验证参数不完整: token={bool(token)}, timestamp={timestamp}, nonce={nonce}, signature={signature}")
+            log.error(
+                f"微信签名验证参数不完整: token={bool(token)}, timestamp={timestamp}, nonce={nonce}, signature={signature}"
+            )
             return False
 
         # 微信签名验证算法：
@@ -474,7 +476,7 @@ class WeChatFollowService:
         l = sorted([token, timestamp, nonce])
         s = "".join(l)
         computed_signature = hashlib.sha1(s.encode("utf-8")).hexdigest()
-        
+
         log.info(f"微信签名验证详情:")
         log.info(f"  - token: {token}")
         log.info(f"  - timestamp: {timestamp}")
@@ -483,7 +485,7 @@ class WeChatFollowService:
         log.info(f"  - 计算出的签名: {computed_signature}")
         log.info(f"  - 微信传入的签名: {signature}")
         log.info(f"  - 签名是否匹配: {computed_signature == signature}")
-        
+
         return computed_signature == signature
 
     @staticmethod
@@ -991,16 +993,35 @@ async def wechat_follow_event(request: Request):
 
         body = await request.body()
         xml_data = body.decode("utf-8")
+
+        log.info(f"收到微信事件回调:")
+        log.info(f"  - msg_signature: {msg_signature}")
+        log.info(f"  - timestamp: {timestamp}")
+        log.info(f"  - nonce: {nonce}")
+        log.info(f"  - xml_data: {xml_data}")
+
         root = ET.fromstring(xml_data)
-        encrypted_message = root.find("Encrypt").text
 
-        # 解密消息
-        decrypted_xml = WeChatFollowService.decrypt_message(
-            request, encrypted_message, msg_signature, timestamp, nonce
-        )
+        # 检查是否是加密消息
+        encrypted_element = root.find("Encrypt")
 
-        # 解析解密后的XML
-        root = ET.fromstring(decrypted_xml)
+        if encrypted_element is not None and encrypted_element.text:
+            # 处理加密消息
+            log.info("检测到加密消息，开始解密...")
+            encrypted_message = encrypted_element.text
+
+            # 解密消息
+            decrypted_xml = WeChatFollowService.decrypt_message(
+                request, encrypted_message, msg_signature, timestamp, nonce
+            )
+
+            log.info(f"解密后的XML: {decrypted_xml}")
+
+            # 解析解密后的XML
+            root = ET.fromstring(decrypted_xml)
+        else:
+            # 处理明文消息
+            log.info("检测到明文消息，直接解析...")
 
         # 提取关键信息
         msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
@@ -1014,12 +1035,19 @@ async def wechat_follow_event(request: Request):
             root.find("EventKey").text if root.find("EventKey") is not None else ""
         )
 
+        log.info(f"解析出的事件信息:")
+        log.info(f"  - MsgType: {msg_type}")
+        log.info(f"  - Event: {event}")
+        log.info(f"  - FromUserName (openid): {openid}")
+        log.info(f"  - EventKey: {scene_str}")
+
         # 处理关注事件
         if msg_type == "event" and event == "subscribe":
             if scene_str.startswith("qrscene_"):
                 scene_id = scene_str[8:]  # 去掉qrscene_前缀
                 WeChatFollowService.mark_followed(scene_id, openid)
                 log.info(f"用户 {openid} 通过场景值 {scene_id} 关注了公众号")
+                log.info(f"已标记场景值 {scene_id} 为已关注状态")
             else:
                 log.info(f"用户 {openid} 关注了公众号（无场景值）")
 
@@ -1028,11 +1056,17 @@ async def wechat_follow_event(request: Request):
             scene_id = scene_str
             WeChatFollowService.mark_followed(scene_id, openid)
             log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
+            log.info(f"已标记场景值 {scene_id} 为已关注状态")
+        else:
+            log.info(f"收到其他类型的事件: MsgType={msg_type}, Event={event}")
 
         return Response(content="success", media_type="text/plain")
 
     except Exception as e:
         log.error(f"处理微信关注事件失败: {str(e)}")
+        import traceback
+
+        log.error(f"错误详情: {traceback.format_exc()}")
         return Response(content="success", media_type="text/plain")
 
 
@@ -1045,7 +1079,7 @@ async def wechat_server_verification(request: Request):
         nonce = request.query_params.get("nonce", "")
         echostr = request.query_params.get("echostr", "")
         token = request.app.state.config.WECHAT_TOKEN
-
+        print(f"收到微信服务器验证请求:")
         log.info(f"收到微信服务器验证请求:")
         log.info(f"  - signature: {signature}")
         log.info(f"  - timestamp: {timestamp}")
@@ -1080,6 +1114,30 @@ async def check_wechat_follow_status(scene_id: str):
         return status_data
     except Exception as e:
         log.error(f"检查微信关注状态失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.get("/wechat/debug/config")
+async def debug_wechat_config(request: Request):
+    """调试微信配置信息（仅用于调试）"""
+    try:
+        config = {
+            "ENABLE_WECHAT_LOGIN": request.app.state.config.ENABLE_WECHAT_LOGIN,
+            "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
+            "WECHAT_APP_SECRET": (
+                "***" if request.app.state.config.WECHAT_APP_SECRET else ""
+            ),
+            "WECHAT_TOKEN": "***" if request.app.state.config.WECHAT_TOKEN else "",
+            "WECHAT_AES_KEY": "***" if request.app.state.config.WECHAT_AES_KEY else "",
+            "callback_url": f"/api/v1/auths/wechat/follow-event",
+            "current_follow_states_count": len(wechat_follow_states),
+            "active_scenes": (
+                list(wechat_follow_states.keys()) if wechat_follow_states else []
+            ),
+        }
+        return {"status": "success", "config": config}
+    except Exception as e:
+        log.error(f"获取微信调试配置失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
