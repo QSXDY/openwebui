@@ -5,6 +5,7 @@ import datetime
 import logging
 import random
 import json
+import socket
 from decimal import Decimal
 import hashlib
 import urllib.parse
@@ -462,11 +463,28 @@ class WeChatFollowService:
     def check_signature(token: str, timestamp: str, nonce: str, signature: str) -> bool:
         """验证微信GET请求签名"""
         if not all([token, timestamp, nonce, signature]):
+            log.error(f"微信签名验证参数不完整: token={bool(token)}, timestamp={timestamp}, nonce={nonce}, signature={signature}")
             return False
 
+        # 微信签名验证算法：
+        # 1. 将token、timestamp、nonce三个参数进行字典序排序
+        # 2. 将三个参数字符串拼接成一个字符串
+        # 3. 对这个字符串进行sha1加密
+        # 4. 开发者获得加密后的字符串可与signature对比
         l = sorted([token, timestamp, nonce])
         s = "".join(l)
-        return hashlib.sha1(s.encode("utf-8")).hexdigest() == signature
+        computed_signature = hashlib.sha1(s.encode("utf-8")).hexdigest()
+        
+        log.info(f"微信签名验证详情:")
+        log.info(f"  - token: {token}")
+        log.info(f"  - timestamp: {timestamp}")
+        log.info(f"  - nonce: {nonce}")
+        log.info(f"  - 排序后拼接字符串: {s}")
+        log.info(f"  - 计算出的签名: {computed_signature}")
+        log.info(f"  - 微信传入的签名: {signature}")
+        log.info(f"  - 签名是否匹配: {computed_signature == signature}")
+        
+        return computed_signature == signature
 
     @staticmethod
     def decrypt_message(
@@ -1028,6 +1046,13 @@ async def wechat_server_verification(request: Request):
         echostr = request.query_params.get("echostr", "")
         token = request.app.state.config.WECHAT_TOKEN
 
+        log.info(f"收到微信服务器验证请求:")
+        log.info(f"  - signature: {signature}")
+        log.info(f"  - timestamp: {timestamp}")
+        log.info(f"  - nonce: {nonce}")
+        log.info(f"  - echostr: {echostr}")
+        log.info(f"  - 配置的token: {token}")
+
         if not token:
             log.error("微信TOKEN未配置")
             raise HTTPException(
@@ -1035,10 +1060,13 @@ async def wechat_server_verification(request: Request):
             )
 
         if WeChatFollowService.check_signature(token, timestamp, nonce, signature):
-            return Response(content=echostr)
+            log.info(f"微信签名验证成功，返回echostr: {echostr}")
+            return Response(content=echostr, media_type="text/plain")
         else:
             log.error("微信签名验证失败")
             raise HTTPException(status_code=403, detail="签名验证失败")
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"微信服务器验证异常: {str(e)}")
         raise HTTPException(status_code=500, detail="服务器内部错误")
