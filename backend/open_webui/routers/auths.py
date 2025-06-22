@@ -1003,29 +1003,29 @@ async def wechat_follow_event(request: Request):
         log.info(f"  - xml_data: {xml_data}")
 
         root = ET.fromstring(xml_data)
-        
+
         # 首先尝试从明文部分获取信息（兼容模式下明文可用）
         msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
-        
+
         if msg_type:
             # 明文模式或兼容模式下的明文部分可用
             log.info("检测到明文消息，直接解析...")
         else:
             # 检查是否是纯加密消息
             encrypted_element = root.find("Encrypt")
-            
+
             if encrypted_element is not None and encrypted_element.text:
                 # 处理纯加密消息
                 log.info("检测到纯加密消息，开始解密...")
                 encrypted_message = encrypted_element.text
-                
+
                 # 解密消息
                 decrypted_xml = WeChatFollowService.decrypt_message(
                     request, encrypted_message, msg_signature, timestamp, nonce
                 )
-                
+
                 log.info(f"解密后的XML: {decrypted_xml}")
-                
+
                 # 解析解密后的XML
                 root = ET.fromstring(decrypted_xml)
             else:
@@ -1034,8 +1034,10 @@ async def wechat_follow_event(request: Request):
 
         # 提取关键信息（如果之前没有提取过msg_type则重新提取）
         if not msg_type:
-            msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
-        
+            msg_type = (
+                root.find("MsgType").text if root.find("MsgType") is not None else ""
+            )
+
         event = root.find("Event").text if root.find("Event") is not None else ""
         openid = (
             root.find("FromUserName").text
