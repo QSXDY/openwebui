@@ -470,7 +470,7 @@
 										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 									>{mode === 'signin' ? $i18n.t('Phone login') : '手机号注册'}</button
 								>
-								<!-- {#if mode === 'signin'}-->
+								{#if mode === 'signin'}
 									<button
 										on:click={() => (login = 'wechat')}
 										class="min-w-fit rounded-full p-1.5 pb-0 {login == 'wechat'
@@ -478,6 +478,7 @@
 											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 										>{$i18n.t('Wechat login')}</button
 									>
+									{/if}
 							</div>
 						</div>
 
@@ -634,12 +635,8 @@
 									</div>
 									{:else if login === 'wechat'}
 									<div class="flex flex-col mt-4 items-center">
-										<div class="text-sm font-medium text-center mb-4">
-											请使用微信扫描下方二维码关注公众号后登录
-										</div>
-										
 										{#if wechatQRCode && !qrCodeExpired}
-											<div class="bg-white p-4 rounded-lg shadow-md border-2 border-gray-200 dark:border-gray-600">
+											<div class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600">
 												<img src={wechatQRCode} alt="微信登录二维码" class="w-48 h-48" />
 											</div>
 											
@@ -724,7 +721,7 @@
 														? mode === 'signin'
 															? '手机号获取验证码进行登录。没有账号？'
 															: '已经拥有账号了？'
-														: '使用微信扫码实现登录。'}
+														: '已经拥有账号了？'}
 												{/if}
 
 												<button
@@ -733,6 +730,7 @@
 													on:click={() => {
 														if (mode === 'signin') {
 															mode = 'signup';
+															login = 'email'
 														} else {
 															mode = 'signin';
 														}

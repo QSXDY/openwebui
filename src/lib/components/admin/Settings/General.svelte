@@ -645,6 +645,73 @@
 					</div>
 				</div>
 				<div class="mb-3">
+					<div class=" mb-2.5 text-base font-medium">公众号登陆配置</div>
+
+					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
+					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
+						<div class=" self-center text-xs font-medium">公众号登陆</div>
+
+						<Switch bind:state={adminConfig.ENABLE_WECHAT_LOGIN} />
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">公众号的AppID</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder="请输入公众号的AppID"
+								bind:value={adminConfig.WECHAT_APP_ID}
+							/>
+						</div>
+					</div>
+
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">公众号的AppSecret</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入公众号的AppSecret`}
+								bind:value={adminConfig.WECHAT_APP_SECRET}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">回调地址</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入回调地址`}
+								bind:value={adminConfig.WECHAT_REDIRECT_URI}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">token</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<input
+								class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								type="text"
+								placeholder={`请输入token`}
+								bind:value={adminConfig.WECHAT_TOKEN}
+							/>
+						</div>
+					</div>
+				</div>
+				<div class="mb-3">
 					<div class=" mb-2.5 text-base font-medium">{$i18n.t('Features')}</div>
 
 					<hr class=" border-gray-100 dark:border-gray-850 my-2" />
