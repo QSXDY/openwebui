@@ -11,6 +11,15 @@ import urllib.parse
 import qrcode
 from io import BytesIO
 import base64
+import struct
+import xml.etree.ElementTree as ET
+
+try:
+    from Crypto.Cipher import AES
+
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
 
 from aiohttp import ClientSession
 
@@ -90,6 +99,23 @@ router = APIRouter()
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
+
+if not CRYPTO_AVAILABLE:
+    log.warning("PyCryptodome未安装，微信消息解密功能将不可用。请运行 'pip install pycryptodome'")
+
+
+class PKCS7Encoder:
+    """提供PKCS7补位/去补位功能"""
+
+    block_size = 32
+
+    @staticmethod
+    def decode(decrypted):
+        pad = decrypted[-1]
+        if pad < 1 or pad > PKCS7Encoder.block_size:
+            pad = 0
+        return decrypted[:-pad]
+
 
 # 短信验证码存储（生产环境建议使用Redis）
 sms_verification_codes = {}
@@ -359,7 +385,6 @@ class WeChatFollowService:
                         raise ValueError(
                             f"获取微信二维码图片失败，状态码: {response.status}"
                         )
-
         except Exception as e:
             log.error(f"生成公众号二维码失败: {str(e)}")
             raise ValueError(f"生成二维码失败: {str(e)}")
@@ -430,6 +455,56 @@ class WeChatFollowService:
             return {"status": "expired"}
 
         return {"status": state_data["status"], "openid": state_data.get("openid")}
+
+    @staticmethod
+    def check_signature(token: str, timestamp: str, nonce: str, signature: str) -> bool:
+        """验证微信GET请求签名"""
+        if not all([token, timestamp, nonce, signature]):
+            return False
+
+        l = sorted([token, timestamp, nonce])
+        s = "".join(l)
+        return hashlib.sha1(s.encode("utf-8")).hexdigest() == signature
+
+    @staticmethod
+    def decrypt_message(
+        request: Request,
+        encrypted_xml: str,
+        msg_signature: str,
+        timestamp: str,
+        nonce: str,
+    ):
+        """解密微信消息并验证签名"""
+        if not CRYPTO_AVAILABLE:
+            raise ImportError("PyCryptodome未安装，无法进行消息解密")
+
+        token = request.app.state.config.WECHAT_TOKEN
+        encoding_aes_key = request.app.state.config.WECHAT_AES_KEY
+        app_id = request.app.state.config.WECHAT_APP_ID
+
+        # 验证签名
+        l = sorted([token, timestamp, nonce, encrypted_xml])
+        s = "".join(l)
+        local_signature = hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+        if msg_signature != local_signature:
+            raise ValueError("消息签名验证失败")
+
+        # 解密
+        key = base64.b64decode(encoding_aes_key + "=")
+        cipher = AES.new(key, AES.MODE_CBC, key[:16])
+        plain_text = PKCS7Encoder.decode(cipher.decrypt(base64.b64decode(encrypted_xml)))
+
+        # 提取并验证信息
+        content = plain_text[16:]
+        message_length = socket.ntohl(struct.unpack("I", content[:4])[0])
+        message = content[4 : 4 + message_length].decode("utf-8")
+        from_app_id = content[4 + message_length :].decode("utf-8")
+
+        if from_app_id != app_id:
+            raise ValueError("AppID不匹配")
+
+        return message
 
 
 ############################
@@ -886,15 +961,24 @@ async def wechat_follow_login(
 @router.post("/wechat/follow-event")
 async def wechat_follow_event(request: Request):
     """处理微信公众号关注事件（微信服务器回调）"""
-    import xml.etree.ElementTree as ET
-
     try:
-        # 解析微信推送的XML数据
+        # 从URL查询参数获取签名信息
+        msg_signature = request.query_params.get("signature", "")
+        timestamp = request.query_params.get("timestamp", "")
+        nonce = request.query_params.get("nonce", "")
+
         body = await request.body()
         xml_data = body.decode("utf-8")
-
-        # 解析XML
         root = ET.fromstring(xml_data)
+        encrypted_message = root.find("Encrypt").text
+
+        # 解密消息
+        decrypted_xml = WeChatFollowService.decrypt_message(
+            request, encrypted_message, msg_signature, timestamp, nonce
+        )
+
+        # 解析解密后的XML
+        root = ET.fromstring(decrypted_xml)
 
         # 提取关键信息
         msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
@@ -910,10 +994,8 @@ async def wechat_follow_event(request: Request):
 
         # 处理关注事件
         if msg_type == "event" and event == "subscribe":
-            # 如果是带参数的关注事件，scene_str格式为qrscene_SCENE_STR
             if scene_str.startswith("qrscene_"):
                 scene_id = scene_str[8:]  # 去掉qrscene_前缀
-                # 标记用户已关注
                 WeChatFollowService.mark_followed(scene_id, openid)
                 log.info(f"用户 {openid} 通过场景值 {scene_id} 关注了公众号")
             else:
@@ -921,17 +1003,39 @@ async def wechat_follow_event(request: Request):
 
         # 处理扫描事件（已关注用户扫描带参数二维码）
         elif msg_type == "event" and event == "SCAN":
-            scene_id = scene_str  # 扫描事件直接返回场景值
+            scene_id = scene_str
             WeChatFollowService.mark_followed(scene_id, openid)
             log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
 
-        # 微信要求返回success或空字符串表示成功处理
         return Response(content="success", media_type="text/plain")
 
     except Exception as e:
         log.error(f"处理微信关注事件失败: {str(e)}")
-        # 即使处理失败，也要返回success，避免微信重复推送
         return Response(content="success", media_type="text/plain")
+
+
+@router.get("/wechat/follow-event")
+async def wechat_server_verification(request: Request):
+    """处理微信服务器URL验证（GET请求）"""
+    try:
+        signature = request.query_params.get("signature", "")
+        timestamp = request.query_params.get("timestamp", "")
+        nonce = request.query_params.get("nonce", "")
+        echostr = request.query_params.get("echostr", "")
+        token = request.app.state.config.WECHAT_TOKEN
+
+        if not token:
+            log.error("微信TOKEN未配置")
+            raise HTTPException(status_code=500, detail="服务器配置错误: 微信TOKEN未设置")
+
+        if WeChatFollowService.check_signature(token, timestamp, nonce, signature):
+            return Response(content=echostr)
+        else:
+            log.error("微信签名验证失败")
+            raise HTTPException(status_code=403, detail="签名验证失败")
+    except Exception as e:
+        log.error(f"微信服务器验证异常: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
 @router.get("/wechat/check/{scene_id}")
@@ -1043,7 +1147,6 @@ async def bind_phone_number(
             Auths.update_auth_binding_info(user.id, "phone", phone_number=phone_number)
 
         return {"success": True, "message": "手机号绑定成功"}
-
     except Exception as e:
         log.error(f"绑定手机号失败: {str(e)}")
         raise HTTPException(
@@ -1813,6 +1916,8 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
         "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
         "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
+        "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
+        "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
     }
 
 
@@ -1860,6 +1965,8 @@ class AdminConfig(BaseModel):
     WECHAT_APP_ID: str = Field(default="")
     WECHAT_APP_SECRET: str = Field(default="")
     WECHAT_REDIRECT_URI: str = Field(default="")
+    WECHAT_TOKEN: str = Field(default="")
+    WECHAT_AES_KEY: str = Field(default="")
 
 
 @router.post("/admin/config")
@@ -1928,6 +2035,8 @@ async def update_admin_config(
     request.app.state.config.WECHAT_APP_ID = form_data.WECHAT_APP_ID
     request.app.state.config.WECHAT_APP_SECRET = form_data.WECHAT_APP_SECRET
     request.app.state.config.WECHAT_REDIRECT_URI = form_data.WECHAT_REDIRECT_URI
+    request.app.state.config.WECHAT_TOKEN = form_data.WECHAT_TOKEN
+    request.app.state.config.WECHAT_AES_KEY = form_data.WECHAT_AES_KEY
 
     get_license_data(
         request.app,
@@ -1937,6 +2046,11 @@ async def update_admin_config(
         form_data.CUSTOM_ICO,
         form_data.CUSTOM_DARK_PNG,
         form_data.ORGANIZATION_NAME,
+        "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
+        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
+        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
+        "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
+        "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
     )
     return {
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
@@ -1982,6 +2096,8 @@ async def update_admin_config(
         "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
         "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
         "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
+        "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
+        "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
     }
 
 
@@ -2015,6 +2131,8 @@ async def get_ldap_server(request: Request, user=Depends(get_admin_user)):
         "use_tls": request.app.state.config.LDAP_USE_TLS,
         "certificate_path": request.app.state.config.LDAP_CA_CERT_FILE,
         "ciphers": request.app.state.config.LDAP_CIPHERS,
+        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
+        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 
@@ -2064,6 +2182,8 @@ async def update_ldap_server(
         "use_tls": request.app.state.config.LDAP_USE_TLS,
         "certificate_path": request.app.state.config.LDAP_CA_CERT_FILE,
         "ciphers": request.app.state.config.LDAP_CIPHERS,
+        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
+        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 
