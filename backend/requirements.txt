@@ -12,7 +12,7 @@ aiohttp==3.11.11
 async-timeout
 aiocache
 aiofiles
-
+pycryptodome
 sqlalchemy==2.0.38
 alembic==1.14.0
 peewee==3.17.9

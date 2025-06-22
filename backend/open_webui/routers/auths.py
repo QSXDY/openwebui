@@ -101,7 +101,9 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 if not CRYPTO_AVAILABLE:
-    log.warning("PyCryptodome未安装，微信消息解密功能将不可用。请运行 'pip install pycryptodome'")
+    log.warning(
+        "PyCryptodome未安装，微信消息解密功能将不可用。请运行 'pip install pycryptodome'"
+    )
 
 
 class PKCS7Encoder:
@@ -493,7 +495,9 @@ class WeChatFollowService:
         # 解密
         key = base64.b64decode(encoding_aes_key + "=")
         cipher = AES.new(key, AES.MODE_CBC, key[:16])
-        plain_text = PKCS7Encoder.decode(cipher.decrypt(base64.b64decode(encrypted_xml)))
+        plain_text = PKCS7Encoder.decode(
+            cipher.decrypt(base64.b64decode(encrypted_xml))
+        )
 
         # 提取并验证信息
         content = plain_text[16:]
@@ -1026,7 +1030,9 @@ async def wechat_server_verification(request: Request):
 
         if not token:
             log.error("微信TOKEN未配置")
-            raise HTTPException(status_code=500, detail="服务器配置错误: 微信TOKEN未设置")
+            raise HTTPException(
+                status_code=500, detail="服务器配置错误: 微信TOKEN未设置"
+            )
 
         if WeChatFollowService.check_signature(token, timestamp, nonce, signature):
             return Response(content=echostr)
@@ -2046,11 +2052,6 @@ async def update_admin_config(
         form_data.CUSTOM_ICO,
         form_data.CUSTOM_DARK_PNG,
         form_data.ORGANIZATION_NAME,
-        "WECHAT_APP_ID": request.app.state.config.WECHAT_APP_ID,
-        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
-        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
-        "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
-        "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
     )
     return {
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
@@ -2131,8 +2132,6 @@ async def get_ldap_server(request: Request, user=Depends(get_admin_user)):
         "use_tls": request.app.state.config.LDAP_USE_TLS,
         "certificate_path": request.app.state.config.LDAP_CA_CERT_FILE,
         "ciphers": request.app.state.config.LDAP_CIPHERS,
-        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
-        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 
@@ -2182,8 +2181,6 @@ async def update_ldap_server(
         "use_tls": request.app.state.config.LDAP_USE_TLS,
         "certificate_path": request.app.state.config.LDAP_CA_CERT_FILE,
         "ciphers": request.app.state.config.LDAP_CIPHERS,
-        "WECHAT_APP_SECRET": request.app.state.config.WECHAT_APP_SECRET,
-        "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
     }
 
 
