@@ -38,7 +38,8 @@
 	let phone = '';
 	let phonecode = '';
 	let password = '';
-	let login = 'email';
+	let login = 'wechat';
+	let logintetxt = false;
 	let ldapUsername = '';
 	let codetext = '发送验证码';
 	let isCounting = false;
@@ -50,8 +51,8 @@
 	let wechatPolling = false;
 	let wechatPollingInterval = null;
 	let qrCodeExpired = false;
-	let needBindPhone = false;  // 是否需要绑定手机号
-	let showBindPhoneModal = false;  // 显示绑定手机号弹窗
+	let needBindPhone = false; // 是否需要绑定手机号
+	let showBindPhoneModal = false; // 显示绑定手机号弹窗
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
@@ -61,7 +62,7 @@
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
 			console.log(sessionUser);
-			
+
 			// 检查是否需要绑定手机号
 			if (sessionUser.need_bind_phone) {
 				needBindPhone = true;
@@ -70,7 +71,7 @@
 			} else {
 				toast.success($i18n.t(`You're now logged in.`));
 			}
-			
+
 			if (sessionUser.token) {
 				localStorage.token = sessionUser.token;
 			}
@@ -196,7 +197,7 @@
 
 	async function sendCode() {
 		console.log('sendCode发送验证码', phone);
-		
+
 		// 确定验证码类型
 		let codeType = 'register';
 		if (showBindPhoneModal) {
@@ -204,7 +205,7 @@
 		} else if (mode === 'signin') {
 			codeType = 'login';
 		}
-		
+
 		try {
 			const sessionUser = await smsSendsend(phone, codeType);
 			if (sessionUser.success) {
@@ -230,7 +231,6 @@
 		}
 	}
 
-
 	// 获取微信公众号关注二维码
 	const getWeChatQR = async () => {
 		try {
@@ -240,7 +240,7 @@
 				wechatSceneId = response.scene_id;
 				qrCodeExpired = false;
 				startWeChatPolling();
-				
+
 				// 设置二维码过期时间
 				setTimeout(() => {
 					if (!qrCodeExpired) {
@@ -258,7 +258,7 @@
 	// 开始轮询微信关注状态
 	const startWeChatPolling = () => {
 		if (wechatPolling) return;
-		
+
 		wechatPolling = true;
 		wechatPollingInterval = setInterval(async () => {
 			try {
@@ -320,6 +320,13 @@
 	$: if (login !== 'wechat') {
 		stopWeChatPolling();
 	}
+	function isWeChatBrowser() {
+		const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+		// 匹配"MicroMessenger"关键词（不区分大小写）
+		return /MicroMessenger/i.test(userAgent);
+	}
+
+	// 使用示例
 
 	onMount(async () => {
 		if ($user !== undefined) {
@@ -327,7 +334,11 @@
 			goto(redirectPath);
 		}
 		await checkOauthCallback();
-
+		if (isWeChatBrowser()) {
+			logintetxt = true;
+		} else {
+			logintetxt = false;
+		}
 		loaded = true;
 		setLogoImage();
 
@@ -351,7 +362,7 @@
 			toast.success('手机号绑定成功！');
 			showBindPhoneModal = false;
 			needBindPhone = false;
-			
+
 			// 绑定成功后跳转
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
@@ -455,9 +466,18 @@
 							<div
 								class="flex gap-1 scrollbar-none w-fit text-center text-base font-medium rounded-full bg-transparent pt-1"
 							>
+								{#if mode === 'signin'}
+									<button
+										on:click={() => (login = 'wechat')}
+										class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'wechat'
+											? ''
+											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+										>{$i18n.t('Wechat login')}</button
+									>
+								{/if}
 								<button
 									on:click={() => (login = 'email')}
-									class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'email'
+									class="min-w-fit rounded-full p-1.5 pb-0 {login == 'email'
 										? ''
 										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 								>
@@ -470,15 +490,6 @@
 										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 									>{mode === 'signin' ? $i18n.t('Phone login') : '手机号注册'}</button
 								>
-								{#if mode === 'signin'}
-									<button
-										on:click={() => (login = 'wechat')}
-										class="min-w-fit rounded-full p-1.5 pb-0 {login == 'wechat'
-											? ''
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-										>{$i18n.t('Wechat login')}</button
-									>
-									{/if}
 							</div>
 						</div>
 
@@ -633,22 +644,28 @@
 											</div>
 										</div>
 									</div>
-									{:else if login === 'wechat'}
+								{:else if login === 'wechat'}
 									<div class="flex flex-col mt-4 items-center">
 										{#if wechatQRCode && !qrCodeExpired}
-											<div class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600">
+											<div
+												class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600"
+											>
 												<img src={wechatQRCode} alt="微信登录二维码" class="w-48 h-48" />
 											</div>
-											
+
 											{#if wechatPolling}
-												<div class="flex items-center mt-4 text-sm text-gray-600 dark:text-gray-400">
+												<div
+													class="flex items-center mt-4 text-sm text-gray-600 dark:text-gray-400"
+												>
 													<Spinner class="w-4 h-4 mr-2" />
 													<span class="animate-pulse">等待关注公众号中...</span>
 												</div>
 											{/if}
 										{:else if qrCodeExpired}
 											<div class="text-center">
-												<div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+												<div
+													class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4"
+												>
 													<div class="text-red-600 dark:text-red-400 text-sm font-medium">
 														⚠️ 二维码已过期
 													</div>
@@ -665,7 +682,9 @@
 											</div>
 										{:else}
 											<div class="flex flex-col items-center">
-												<div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 mb-4 w-48 h-48 flex items-center justify-center">
+												<div
+													class="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 mb-4 w-48 h-48 flex items-center justify-center"
+												>
 													<div class="text-center">
 														<Spinner class="w-8 h-8 mx-auto mb-2" />
 														<div class="text-sm text-gray-600 dark:text-gray-400">
@@ -675,11 +694,15 @@
 												</div>
 											</div>
 										{/if}
-										
-										<div class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs leading-relaxed">
-											💡 请使用微信扫描上方二维码关注公众号，关注成功后即可自动登录
+
+										<div
+											class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs leading-relaxed"
+										>
+											💡 请{logintetxt
+												? '长按'
+												: '使用微信扫描上方'}二维码关注公众号，关注成功后即可自动登录
 										</div>
-										
+
 										{#if wechatPolling}
 											<div class="mt-2 text-xs text-blue-600 dark:text-blue-400 text-center">
 												二维码有效期：10分钟
@@ -730,7 +753,7 @@
 													on:click={() => {
 														if (mode === 'signin') {
 															mode = 'signup';
-															login = 'email'
+															login = 'email';
 														} else {
 															mode = 'signin';
 														}
@@ -887,17 +910,16 @@
 	<div class="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50">
 		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 shadow-2xl">
 			<div class="text-center mb-6">
-				<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-					完善账户信息
-				</h2>
-				<p class="text-sm text-gray-600 dark:text-gray-400">
-					为了账户安全，请绑定您的手机号
-				</p>
+				<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">完善账户信息</h2>
+				<p class="text-sm text-gray-600 dark:text-gray-400">为了账户安全，请绑定您的手机号</p>
 			</div>
 
 			<div class="space-y-4">
 				<div>
-					<label for="bind-phone" class="text-sm font-medium text-left mb-1 block text-gray-700 dark:text-gray-300">
+					<label
+						for="bind-phone"
+						class="text-sm font-medium text-left mb-1 block text-gray-700 dark:text-gray-300"
+					>
 						手机号
 					</label>
 					<input
@@ -911,7 +933,10 @@
 				</div>
 
 				<div>
-					<label for="bind-code" class="text-sm font-medium text-left mb-1 block text-gray-700 dark:text-gray-300">
+					<label
+						for="bind-code"
+						class="text-sm font-medium text-left mb-1 block text-gray-700 dark:text-gray-300"
+					>
 						验证码
 					</label>
 					<div class="flex gap-2">
