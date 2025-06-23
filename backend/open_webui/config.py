@@ -3022,3 +3022,49 @@ WECHAT_AES_KEY = PersistentConfig(
     "wechat.aes_key",
     os.environ.get("WECHAT_AES_KEY", ""),
 )
+
+# 微信公众号消息推送配置
+WECHAT_WELCOME_ENABLED = PersistentConfig(
+    "WECHAT_WELCOME_ENABLED",
+    "wechat.welcome.enabled",
+    os.environ.get("WECHAT_WELCOME_ENABLED", "true").lower() == "true",
+)
+
+WECHAT_WELCOME_MESSAGE = PersistentConfig(
+    "WECHAT_WELCOME_MESSAGE",
+    "wechat.welcome.message",
+    os.environ.get(
+        "WECHAT_WELCOME_MESSAGE",
+        "🎉 欢迎关注！\n\n您已成功关注我们的公众号，现在可以使用微信快速登录我们的AI平台了！\n\n✨ 功能特色：\n• 微信快捷登录\n• 智能AI对话\n• 多模型支持\n\n点击菜单或发送消息开始体验吧！",
+    ),
+)
+
+WECHAT_AUTO_REPLY_ENABLED = PersistentConfig(
+    "WECHAT_AUTO_REPLY_ENABLED",
+    "wechat.auto_reply.enabled",
+    os.environ.get("WECHAT_AUTO_REPLY_ENABLED", "true").lower() == "true",
+)
+
+WECHAT_DEFAULT_REPLY_MESSAGE = PersistentConfig(
+    "WECHAT_DEFAULT_REPLY_MESSAGE",
+    "wechat.auto_reply.default_message",
+    os.environ.get(
+        "WECHAT_DEFAULT_REPLY_MESSAGE",
+        "🤖 您好！\n\n感谢您的消息。如需使用完整AI功能，请访问我们的网站进行体验。\n\n🌐 网站地址：{WEBUI_URL}\n\n您也可以点击菜单中的「AI对话」直接开始体验！",
+    ),
+)
+
+WECHAT_KEYWORD_REPLIES = PersistentConfig(
+    "WECHAT_KEYWORD_REPLIES",
+    "wechat.keyword_replies",
+    json.loads(
+        os.environ.get(
+            "WECHAT_KEYWORD_REPLIES",
+            """[
+        {"keywords": ["帮助", "help", "使用说明"], "reply": "📖 使用帮助\\n\\n🔹 发送任意消息与AI对话\\n🔹 点击菜单访问完整功能\\n🔹 支持多种AI模型\\n🔹 支持图片、文档等多媒体\\n\\n如需更多功能，请访问我们的网站！"},
+        {"keywords": ["登录", "注册", "账号"], "reply": "🔐 账号说明\\n\\n通过关注本公众号，您已自动创建账号！\\n\\n✅ 下次登录时选择「微信登录」即可快速进入\\n✅ 无需记住密码\\n✅ 一键快速访问\\n\\n立即体验：{WEBUI_URL}"},
+        {"keywords": ["功能", "特色", "介绍"], "reply": "🌟 平台特色\\n\\n🤖 多AI模型支持\\n📊 智能数据分析\\n🎨 AI绘画创作\\n📝 文档智能处理\\n🔍 网络搜索集成\\n💬 实时对话体验\\n\\n立即体验所有功能：{WEBUI_URL}"}
+    ]""",
+        )
+    ),
+)

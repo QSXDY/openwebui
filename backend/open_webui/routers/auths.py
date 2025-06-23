@@ -427,6 +427,101 @@ class WeChatFollowService:
                 return user_data
 
     @staticmethod
+    async def get_access_token(request: Request) -> str:
+        """获取微信Access Token"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        if not app_id or not app_secret:
+            raise ValueError("微信公众号配置不完整")
+
+        token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+
+        async with ClientSession() as session:
+            async with session.get(token_url) as response:
+                token_data = await response.json()
+                if "access_token" not in token_data:
+                    raise ValueError(
+                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
+                    )
+                return token_data["access_token"]
+
+    @staticmethod
+    async def send_text_message(request: Request, openid: str, content: str) -> bool:
+        """发送文本消息给微信用户"""
+        try:
+            access_token = await WeChatFollowService.get_access_token(request)
+
+            # 替换消息中的变量
+            webui_url = request.app.state.config.WEBUI_URL
+            content = content.replace("{WEBUI_URL}", webui_url)
+
+            send_url = f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={access_token}"
+
+            message_data = {
+                "touser": openid,
+                "msgtype": "text",
+                "text": {"content": content},
+            }
+
+            async with ClientSession() as session:
+                async with session.post(send_url, json=message_data) as response:
+                    result = await response.json()
+                    if result.get("errcode") == 0:
+                        log.info(f"成功发送消息给用户 {openid}")
+                        return True
+                    else:
+                        log.error(f"发送消息失败: {result}")
+                        return False
+        except Exception as e:
+            log.error(f"发送微信消息异常: {str(e)}")
+            return False
+
+    @staticmethod
+    async def send_welcome_message(request: Request, openid: str) -> bool:
+        """发送欢迎消息"""
+        if not request.app.state.config.WECHAT_WELCOME_ENABLED:
+            return True
+
+        welcome_message = request.app.state.config.WECHAT_WELCOME_MESSAGE
+        return await WeChatFollowService.send_text_message(
+            request, openid, welcome_message
+        )
+
+    @staticmethod
+    def find_keyword_reply(request: Request, message_content: str) -> str:
+        """根据关键词找到对应的回复"""
+        if not request.app.state.config.WECHAT_AUTO_REPLY_ENABLED:
+            return None
+
+        keyword_replies = request.app.state.config.WECHAT_KEYWORD_REPLIES
+
+        message_lower = message_content.lower().strip()
+
+        for reply_config in keyword_replies:
+            keywords = reply_config.get("keywords", [])
+            for keyword in keywords:
+                if keyword.lower() in message_lower:
+                    return reply_config.get("reply", "")
+
+        # 如果没有匹配到关键词，返回默认回复
+        return request.app.state.config.WECHAT_DEFAULT_REPLY_MESSAGE
+
+    @staticmethod
+    async def handle_user_message(
+        request: Request, openid: str, message_content: str
+    ) -> bool:
+        """处理用户发送的消息"""
+        reply_message = WeChatFollowService.find_keyword_reply(request, message_content)
+
+        if reply_message:
+            return await WeChatFollowService.send_text_message(
+                request, openid, reply_message
+            )
+
+        return True
+
+    @staticmethod
     def validate_scene_id(scene_id: str) -> bool:
         """验证场景值"""
         if scene_id not in wechat_follow_states:
@@ -878,6 +973,8 @@ async def wechat_follow_login(
             request, form_data.openid
         )
 
+        log.info(f"微信用户信息: {user_info}")
+
         # 使用openid作为唯一标识
         email = f"{form_data.openid}@wechat.local"
 
@@ -894,8 +991,13 @@ async def wechat_follow_login(
             )
 
             # 使用微信昵称作为用户名，如果为空则使用默认名称
+            # 微信公众号API中头像字段是 headimgurl，昵称是 nickname
             nickname = user_info.get("nickname", "微信用户")
             profile_image_url = user_info.get("headimgurl", "")
+
+            log.info(
+                f"创建微信用户: nickname={nickname}, profile_image_url={profile_image_url}"
+            )
 
             user = Auths.insert_new_auth(
                 email=email,
@@ -910,6 +1012,26 @@ async def wechat_follow_login(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="创建用户失败",
                 )
+        else:
+            # 如果用户已存在，更新用户的头像和昵称
+            log.info(f"用户已存在，更新头像和昵称: {user.email}")
+            nickname = user_info.get("nickname", user.name)
+            profile_image_url = user_info.get("headimgurl", user.profile_image_url)
+
+            # 更新用户信息
+            Users.update_user_by_id(
+                user.id,
+                {
+                    "name": nickname,
+                    "profile_image_url": profile_image_url,
+                },
+            )
+
+            # 重新获取更新后的用户信息
+            user = Users.get_user_by_id(user.id)
+            log.info(
+                f"用户信息已更新: name={user.name}, profile_image_url={user.profile_image_url}"
+            )
 
         # 检查是否绑定了手机号
         has_phone = False
@@ -1061,8 +1183,20 @@ async def wechat_follow_event(request: Request):
                 WeChatFollowService.mark_followed(scene_id, openid)
                 log.info(f"用户 {openid} 通过场景值 {scene_id} 关注了公众号")
                 log.info(f"已标记场景值 {scene_id} 为已关注状态")
+
+                # 发送欢迎消息
+                try:
+                    await WeChatFollowService.send_welcome_message(request, openid)
+                except Exception as e:
+                    log.error(f"发送欢迎消息失败: {str(e)}")
             else:
                 log.info(f"用户 {openid} 关注了公众号（无场景值）")
+
+                # 发送欢迎消息
+                try:
+                    await WeChatFollowService.send_welcome_message(request, openid)
+                except Exception as e:
+                    log.error(f"发送欢迎消息失败: {str(e)}")
 
         # 处理扫描事件（已关注用户扫描带参数二维码）
         elif msg_type == "event" and event == "SCAN":
@@ -1070,6 +1204,20 @@ async def wechat_follow_event(request: Request):
             WeChatFollowService.mark_followed(scene_id, openid)
             log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
             log.info(f"已标记场景值 {scene_id} 为已关注状态")
+
+        # 处理文本消息
+        elif msg_type == "text":
+            content = (
+                root.find("Content").text if root.find("Content") is not None else ""
+            )
+            log.info(f"收到用户 {openid} 的文本消息: {content}")
+
+            # 处理用户消息并自动回复
+            try:
+                await WeChatFollowService.handle_user_message(request, openid, content)
+            except Exception as e:
+                log.error(f"处理用户消息失败: {str(e)}")
+
         else:
             log.info(f"收到其他类型的事件: MsgType={msg_type}, Event={event}")
 
@@ -1147,10 +1295,36 @@ async def debug_wechat_config(request: Request):
             "active_scenes": (
                 list(wechat_follow_states.keys()) if wechat_follow_states else []
             ),
+            # 添加消息推送配置信息
+            "WECHAT_WELCOME_ENABLED": request.app.state.config.WECHAT_WELCOME_ENABLED,
+            "WECHAT_AUTO_REPLY_ENABLED": request.app.state.config.WECHAT_AUTO_REPLY_ENABLED,
         }
         return {"status": "success", "config": config}
     except Exception as e:
         log.error(f"获取微信调试配置失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+class WeChatTestMessageForm(BaseModel):
+    openid: str = Field(..., description="测试用户的OpenID")
+    message: str = Field(..., description="测试消息内容")
+
+
+@router.post("/wechat/test/message")
+async def test_wechat_message(
+    request: Request, form_data: WeChatTestMessageForm, user=Depends(get_admin_user)
+):
+    """测试微信消息发送（仅管理员）"""
+    try:
+        success = await WeChatFollowService.send_text_message(
+            request, form_data.openid, form_data.message
+        )
+        if success:
+            return {"status": "success", "message": "测试消息发送成功"}
+        else:
+            return {"status": "error", "message": "测试消息发送失败"}
+    except Exception as e:
+        log.error(f"测试微信消息发送失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
@@ -2023,6 +2197,12 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
         "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
         "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
+        # 添加微信消息推送配置
+        "WECHAT_WELCOME_ENABLED": request.app.state.config.WECHAT_WELCOME_ENABLED,
+        "WECHAT_WELCOME_MESSAGE": request.app.state.config.WECHAT_WELCOME_MESSAGE,
+        "WECHAT_AUTO_REPLY_ENABLED": request.app.state.config.WECHAT_AUTO_REPLY_ENABLED,
+        "WECHAT_DEFAULT_REPLY_MESSAGE": request.app.state.config.WECHAT_DEFAULT_REPLY_MESSAGE,
+        "WECHAT_KEYWORD_REPLIES": request.app.state.config.WECHAT_KEYWORD_REPLIES,
     }
 
 
@@ -2072,6 +2252,16 @@ class AdminConfig(BaseModel):
     WECHAT_REDIRECT_URI: str = Field(default="")
     WECHAT_TOKEN: str = Field(default="")
     WECHAT_AES_KEY: str = Field(default="")
+    # 添加微信消息推送配置
+    WECHAT_WELCOME_ENABLED: bool = Field(default=True)
+    WECHAT_WELCOME_MESSAGE: str = Field(
+        default="🎉 欢迎关注！\n\n您已成功关注我们的公众号，现在可以使用微信快速登录我们的AI平台了！\n\n✨ 功能特色：\n• 微信快捷登录\n• 智能AI对话\n• 多模型支持\n\n点击菜单或发送消息开始体验吧！"
+    )
+    WECHAT_AUTO_REPLY_ENABLED: bool = Field(default=True)
+    WECHAT_DEFAULT_REPLY_MESSAGE: str = Field(
+        default="🤖 您好！\n\n感谢您的消息。如需使用完整AI功能，请访问我们的网站进行体验。\n\n🌐 网站地址：{WEBUI_URL}\n\n您也可以点击菜单中的「AI对话」直接开始体验！"
+    )
+    WECHAT_KEYWORD_REPLIES: List[dict] = Field(default=[])
 
 
 @router.post("/admin/config")
@@ -2142,6 +2332,16 @@ async def update_admin_config(
     request.app.state.config.WECHAT_REDIRECT_URI = form_data.WECHAT_REDIRECT_URI
     request.app.state.config.WECHAT_TOKEN = form_data.WECHAT_TOKEN
     request.app.state.config.WECHAT_AES_KEY = form_data.WECHAT_AES_KEY
+    # 添加微信消息推送配置
+    request.app.state.config.WECHAT_WELCOME_ENABLED = form_data.WECHAT_WELCOME_ENABLED
+    request.app.state.config.WECHAT_WELCOME_MESSAGE = form_data.WECHAT_WELCOME_MESSAGE
+    request.app.state.config.WECHAT_AUTO_REPLY_ENABLED = (
+        form_data.WECHAT_AUTO_REPLY_ENABLED
+    )
+    request.app.state.config.WECHAT_DEFAULT_REPLY_MESSAGE = (
+        form_data.WECHAT_DEFAULT_REPLY_MESSAGE
+    )
+    request.app.state.config.WECHAT_KEYWORD_REPLIES = form_data.WECHAT_KEYWORD_REPLIES
 
     get_license_data(
         request.app,
@@ -2198,6 +2398,12 @@ async def update_admin_config(
         "WECHAT_REDIRECT_URI": request.app.state.config.WECHAT_REDIRECT_URI,
         "WECHAT_TOKEN": request.app.state.config.WECHAT_TOKEN,
         "WECHAT_AES_KEY": request.app.state.config.WECHAT_AES_KEY,
+        # 添加微信消息推送配置
+        "WECHAT_WELCOME_ENABLED": request.app.state.config.WECHAT_WELCOME_ENABLED,
+        "WECHAT_WELCOME_MESSAGE": request.app.state.config.WECHAT_WELCOME_MESSAGE,
+        "WECHAT_AUTO_REPLY_ENABLED": request.app.state.config.WECHAT_AUTO_REPLY_ENABLED,
+        "WECHAT_DEFAULT_REPLY_MESSAGE": request.app.state.config.WECHAT_DEFAULT_REPLY_MESSAGE,
+        "WECHAT_KEYWORD_REPLIES": request.app.state.config.WECHAT_KEYWORD_REPLIES,
     }
 
 
