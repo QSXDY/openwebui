@@ -428,7 +428,8 @@ class WeChatFollowService:
                 processed_data = {
                     "subscribe": user_data.get("subscribe", 1),
                     "openid": user_data.get("openid", openid),
-                    "nickname": user_data.get("nickname", "") or f"微信用户_{openid[-8:]}",
+                    "nickname": user_data.get("nickname", "")
+                    or f"微信用户_{openid[-8:]}",
                     "sex": user_data.get("sex", 0),
                     "language": user_data.get("language", "zh_CN"),
                     "city": user_data.get("city", ""),
@@ -440,7 +441,9 @@ class WeChatFollowService:
                     "remark": user_data.get("remark", ""),
                     "groupid": user_data.get("groupid", 0),
                     "tagid_list": user_data.get("tagid_list", []),
-                    "subscribe_scene": user_data.get("subscribe_scene", "ADD_SCENE_QR_CODE"),
+                    "subscribe_scene": user_data.get(
+                        "subscribe_scene", "ADD_SCENE_QR_CODE"
+                    ),
                     "qr_scene": user_data.get("qr_scene", 0),
                     "qr_scene_str": user_data.get("qr_scene_str", ""),
                 }
@@ -448,9 +451,12 @@ class WeChatFollowService:
                 # 记录详细的调试信息
                 log.info(f"原始微信用户信息: {user_data}")
                 log.info(f"处理后的用户信息: {processed_data}")
-                
+
                 # 如果昵称和头像都为空，记录警告
-                if not processed_data["nickname"] or processed_data["nickname"] == f"微信用户_{openid[-8:]}":
+                if (
+                    not processed_data["nickname"]
+                    or processed_data["nickname"] == f"微信用户_{openid[-8:]}"
+                ):
                     log.warning(f"用户 {openid} 的昵称为空，可能是隐私设置限制")
                 if not processed_data["headimgurl"]:
                     log.warning(f"用户 {openid} 的头像为空，可能是隐私设置限制")
@@ -486,16 +492,21 @@ class WeChatFollowService:
             # 替换消息中的变量
             webui_url = request.app.state.config.WEBUI_URL
             content = content.replace("{WEBUI_URL}", webui_url)
-            
+
             # 确保内容是正确的UTF-8字符串
             if isinstance(content, bytes):
-                content = content.decode('utf-8')
-            
+                content = content.decode("utf-8")
+
             # 处理可能的Unicode转义序列
             try:
                 # 如果内容包含Unicode转义序列，进行解码
-                if '\\u' in content:
-                    content = content.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
+                if "\\u" in content:
+                    content = (
+                        content.encode("utf-8")
+                        .decode("unicode_escape")
+                        .encode("latin1")
+                        .decode("utf-8")
+                    )
             except (UnicodeDecodeError, UnicodeEncodeError):
                 # 如果解码失败，保持原内容
                 pass
@@ -507,16 +518,16 @@ class WeChatFollowService:
                 "msgtype": "text",
                 "text": {"content": content},
             }
-            
+
             # 记录发送的消息内容以便调试
             log.info(f"准备发送消息给用户 {openid}，内容: {content}")
 
             async with ClientSession() as session:
                 # 确保使用UTF-8编码发送JSON
                 async with session.post(
-                    send_url, 
+                    send_url,
                     json=message_data,
-                    headers={'Content-Type': 'application/json; charset=utf-8'}
+                    headers={"Content-Type": "application/json; charset=utf-8"},
                 ) as response:
                     result = await response.json()
                     if result.get("errcode") == 0:
@@ -528,6 +539,7 @@ class WeChatFollowService:
         except Exception as e:
             log.error(f"发送微信消息异常: {str(e)}")
             import traceback
+
             log.error(f"异常详情: {traceback.format_exc()}")
             return False
 
@@ -1049,15 +1061,18 @@ async def wechat_follow_login(
             nickname = user_info.get("nickname", "")
             if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
                 nickname = f"微信用户_{form_data.openid[-8:]}"
-            
+
             profile_image_url = user_info.get("headimgurl", "")
-            
+
             # 如果没有头像，使用默认头像生成逻辑
             if not profile_image_url:
                 # 生成基于openid的默认头像URL（这里可以集成gravatar或其他头像服务）
                 import hashlib
+
                 avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
-                profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
+                profile_image_url = (
+                    f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
+                )
 
             log.info(
                 f"创建微信用户: nickname={nickname}, profile_image_url={profile_image_url}"
@@ -1079,7 +1094,7 @@ async def wechat_follow_login(
         else:
             # 如果用户已存在，更新用户的头像和昵称
             log.info(f"用户已存在，更新头像和昵称: {user.email}")
-            
+
             # 处理昵称
             nickname = user_info.get("nickname", "")
             if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
@@ -1088,16 +1103,19 @@ async def wechat_follow_login(
                     nickname = user.name  # 保持原有昵称
                 else:
                     nickname = f"微信用户_{form_data.openid[-8:]}"
-            
+
             # 处理头像
             profile_image_url = user_info.get("headimgurl", "")
             if not profile_image_url:
                 # 如果微信头像为空，检查用户是否已有头像
-                if user.profile_image_url and not user.profile_image_url.startswith("https://www.gravatar.com/avatar/"):
+                if user.profile_image_url and not user.profile_image_url.startswith(
+                    "https://www.gravatar.com/avatar/"
+                ):
                     profile_image_url = user.profile_image_url  # 保持原有头像
                 else:
                     # 生成默认头像
                     import hashlib
+
                     avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
                     profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
 
