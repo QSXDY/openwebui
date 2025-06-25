@@ -424,7 +424,38 @@ class WeChatFollowService:
                         f"获取用户信息失败: {user_data.get('errmsg', '未知错误')}"
                     )
 
-                return user_data
+                # 处理空值和默认值
+                processed_data = {
+                    "subscribe": user_data.get("subscribe", 1),
+                    "openid": user_data.get("openid", openid),
+                    "nickname": user_data.get("nickname", "") or f"微信用户_{openid[-8:]}",
+                    "sex": user_data.get("sex", 0),
+                    "language": user_data.get("language", "zh_CN"),
+                    "city": user_data.get("city", ""),
+                    "province": user_data.get("province", ""),
+                    "country": user_data.get("country", ""),
+                    "headimgurl": user_data.get("headimgurl", "") or "",
+                    "subscribe_time": user_data.get("subscribe_time", int(time.time())),
+                    "unionid": user_data.get("unionid", ""),
+                    "remark": user_data.get("remark", ""),
+                    "groupid": user_data.get("groupid", 0),
+                    "tagid_list": user_data.get("tagid_list", []),
+                    "subscribe_scene": user_data.get("subscribe_scene", "ADD_SCENE_QR_CODE"),
+                    "qr_scene": user_data.get("qr_scene", 0),
+                    "qr_scene_str": user_data.get("qr_scene_str", ""),
+                }
+
+                # 记录详细的调试信息
+                log.info(f"原始微信用户信息: {user_data}")
+                log.info(f"处理后的用户信息: {processed_data}")
+                
+                # 如果昵称和头像都为空，记录警告
+                if not processed_data["nickname"] or processed_data["nickname"] == f"微信用户_{openid[-8:]}":
+                    log.warning(f"用户 {openid} 的昵称为空，可能是隐私设置限制")
+                if not processed_data["headimgurl"]:
+                    log.warning(f"用户 {openid} 的头像为空，可能是隐私设置限制")
+
+                return processed_data
 
     @staticmethod
     async def get_access_token(request: Request) -> str:
@@ -455,6 +486,19 @@ class WeChatFollowService:
             # 替换消息中的变量
             webui_url = request.app.state.config.WEBUI_URL
             content = content.replace("{WEBUI_URL}", webui_url)
+            
+            # 确保内容是正确的UTF-8字符串
+            if isinstance(content, bytes):
+                content = content.decode('utf-8')
+            
+            # 处理可能的Unicode转义序列
+            try:
+                # 如果内容包含Unicode转义序列，进行解码
+                if '\\u' in content:
+                    content = content.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                # 如果解码失败，保持原内容
+                pass
 
             send_url = f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={access_token}"
 
@@ -463,9 +507,17 @@ class WeChatFollowService:
                 "msgtype": "text",
                 "text": {"content": content},
             }
+            
+            # 记录发送的消息内容以便调试
+            log.info(f"准备发送消息给用户 {openid}，内容: {content}")
 
             async with ClientSession() as session:
-                async with session.post(send_url, json=message_data) as response:
+                # 确保使用UTF-8编码发送JSON
+                async with session.post(
+                    send_url, 
+                    json=message_data,
+                    headers={'Content-Type': 'application/json; charset=utf-8'}
+                ) as response:
                     result = await response.json()
                     if result.get("errcode") == 0:
                         log.info(f"成功发送消息给用户 {openid}")
@@ -475,6 +527,8 @@ class WeChatFollowService:
                         return False
         except Exception as e:
             log.error(f"发送微信消息异常: {str(e)}")
+            import traceback
+            log.error(f"异常详情: {traceback.format_exc()}")
             return False
 
     @staticmethod
@@ -992,8 +1046,18 @@ async def wechat_follow_login(
 
             # 使用微信昵称作为用户名，如果为空则使用默认名称
             # 微信公众号API中头像字段是 headimgurl，昵称是 nickname
-            nickname = user_info.get("nickname", "微信用户")
+            nickname = user_info.get("nickname", "")
+            if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
+                nickname = f"微信用户_{form_data.openid[-8:]}"
+            
             profile_image_url = user_info.get("headimgurl", "")
+            
+            # 如果没有头像，使用默认头像生成逻辑
+            if not profile_image_url:
+                # 生成基于openid的默认头像URL（这里可以集成gravatar或其他头像服务）
+                import hashlib
+                avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
+                profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
 
             log.info(
                 f"创建微信用户: nickname={nickname}, profile_image_url={profile_image_url}"
@@ -1015,8 +1079,27 @@ async def wechat_follow_login(
         else:
             # 如果用户已存在，更新用户的头像和昵称
             log.info(f"用户已存在，更新头像和昵称: {user.email}")
-            nickname = user_info.get("nickname", user.name)
-            profile_image_url = user_info.get("headimgurl", user.profile_image_url)
+            
+            # 处理昵称
+            nickname = user_info.get("nickname", "")
+            if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
+                # 如果微信昵称为空或是默认生成的，保持原有昵称或生成新的
+                if user.name and not user.name.startswith("微信用户_"):
+                    nickname = user.name  # 保持原有昵称
+                else:
+                    nickname = f"微信用户_{form_data.openid[-8:]}"
+            
+            # 处理头像
+            profile_image_url = user_info.get("headimgurl", "")
+            if not profile_image_url:
+                # 如果微信头像为空，检查用户是否已有头像
+                if user.profile_image_url and not user.profile_image_url.startswith("https://www.gravatar.com/avatar/"):
+                    profile_image_url = user.profile_image_url  # 保持原有头像
+                else:
+                    # 生成默认头像
+                    import hashlib
+                    avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
+                    profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
 
             # 更新用户信息
             Users.update_user_by_id(
@@ -1204,6 +1287,13 @@ async def wechat_follow_event(request: Request):
             WeChatFollowService.mark_followed(scene_id, openid)
             log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
             log.info(f"已标记场景值 {scene_id} 为已关注状态")
+
+            # 发送欢迎消息（SCAN事件也应该发送）
+            try:
+                await WeChatFollowService.send_welcome_message(request, openid)
+                log.info(f"成功发送欢迎消息给已关注用户 {openid}")
+            except Exception as e:
+                log.error(f"发送欢迎消息失败: {str(e)}")
 
         # 处理文本消息
         elif msg_type == "text":
