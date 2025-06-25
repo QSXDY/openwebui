@@ -78,6 +78,25 @@
 
 	const updateHandler = async () => {
 		webhookUrl = await updateWebhookUrl(localStorage.token, webhookUrl);
+		if (adminConfig.WECHAT_KEYWORD_REPLIES) {
+			const processedData = adminConfig.WECHAT_KEYWORD_REPLIES.map((item) => {
+				let keywordsArray;
+
+				// 如果 keywords 是字符串，则按逗号分割成数组
+				if (typeof item.keywords === 'string') {
+					keywordsArray = item.keywords.split(',').map((k) => k.trim()); // 去除两边空格
+				} else if (Array.isArray(item.keywords)) {
+					// 如果已经是数组，直接保留原样
+					keywordsArray = item.keywords;
+				}
+
+				return {
+					...item,
+					keywords: keywordsArray
+				};
+			});
+			adminConfig.WECHAT_KEYWORD_REPLIES = processedData;
+		}
 		const res = await updateAdminConfig(localStorage.token, adminConfig);
 		await updateLdapServerHandler();
 
@@ -709,6 +728,80 @@
 								bind:value={adminConfig.WECHAT_TOKEN}
 							/>
 						</div>
+					</div>
+					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
+						<div class=" self-center text-xs font-medium">是否启用自动回复功能</div>
+
+						<Switch bind:state={adminConfig.WECHAT_AUTO_REPLY_ENABLED} />
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">默认回复消息</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<textarea
+								class="w-full rounded-lg py-2 min-h-20 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								placeholder={`请输入默认回复消息`}
+								bind:value={adminConfig.WECHAT_DEFAULT_REPLY_MESSAGE}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 flex w-full items-center justify-between pr-2">
+						<div class=" self-center text-xs font-medium">是否启用新关注用户欢迎消息功能</div>
+
+						<Switch bind:state={adminConfig.WECHAT_WELCOME_ENABLED} />
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">新关注用户欢迎消息</div>
+						</div>
+
+						<div class="flex mt-2 space-x-2">
+							<textarea
+								class="w-full rounded-lg min-h-20 py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+								placeholder={`请输入新关注用户欢迎消息`}
+								bind:value={adminConfig.WECHAT_WELCOME_MESSAGE}
+							/>
+						</div>
+					</div>
+					<div class="mb-2.5 w-full justify-between">
+						<div class="flex w-full justify-between">
+							<div class=" self-center text-xs font-medium">关键词自动回复规则</div>
+						</div>
+
+						{#each adminConfig.WECHAT_KEYWORD_REPLIES as item, index}
+							<div>
+								<div class="my-2.5 w-full justify-between">
+									<div class="flex w-full justify-between">
+										<div class=" self-center text-xs font-medium">
+											关键词{index + 1}（使用”,“分割）
+										</div>
+									</div>
+									<div class="flex mt-2 space-x-2">
+										<input
+											class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+											type="text"
+											placeholder={`请输入关键词`}
+											bind:value={item.keywords}
+										/>
+									</div>
+								</div>
+								<div class="mb-2.5 w-full justify-between">
+									<div class="flex w-full justify-between">
+										<div class=" self-center text-xs font-medium">关键词{index + 1}回复消息</div>
+									</div>
+
+									<div class="flex mt-2 space-x-2">
+										<textarea
+											class="w-full rounded-lg min-h-20 py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+											placeholder={`请输入关键词回复消息`}
+											bind:value={item.reply}
+										/>
+									</div>
+								</div>
+							</div>
+						{/each}
 					</div>
 				</div>
 				<div class="mb-3">
