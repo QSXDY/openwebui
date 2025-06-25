@@ -182,20 +182,27 @@ class CreditDeduct:
         from open_webui.models.groups import Groups
         from open_webui.models.subscription import SubscriptionCredits
 
-        # 获取用户所在的权限组
-        group = Groups.get_user_group(self.user.id)
+        # 获取用户所在的所有权限组（按加入时间排序）
+        groups = Groups.get_user_groups_ordered(self.user.id)
         user_id_to_deduct = self.user.id
         desc = f"updated by {self.__class__.__name__}"
+        selected_group = None
 
-        # 如果用户在权限组中且该组有管理员，并且用户不是管理员
-        if group and group.admin_id and group.admin_id != self.user.id:
+        # 按加入时间顺序查找有足够积分的管理员
+        for group in groups:
+            # 跳过用户自己是管理员的组
+            if not group.admin_id or group.admin_id == self.user.id:
+                continue
+
             # 获取管理员的积分
             admin_credit = Credits.get_credit_by_user_id(group.admin_id)
 
             # 检查管理员的总积分是否足够
             if admin_credit and float(admin_credit.credit) >= self.total_price:
                 user_id_to_deduct = group.admin_id
-                desc = f"{desc} (代用户 {self.user.id} 支付)"
+                selected_group = group
+                desc = f"{desc} (代用户 {self.user.id} 支付, 企业: {group.name})"
+                break
 
         # 优先消费套餐积分
         remaining_cost = int(self.total_price)
@@ -277,9 +284,10 @@ class CreditDeduct:
                 )
             )
         logger.info(
-            "[credit_deduct] user: %s; actual_payer: %s; tokens: %d %d; cost: %s; subscription_used: %d; regular_used: %d",
+            "[credit_deduct] user: %s; actual_payer: %s; group: %s; tokens: %d %d; cost: %s; subscription_used: %d; regular_used: %d",
             self.user.id,
             user_id_to_deduct,
+            selected_group.name if selected_group else "None",
             self.usage.prompt_tokens,
             self.usage.completion_tokens,
             self.total_price,

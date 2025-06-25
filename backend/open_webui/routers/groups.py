@@ -99,9 +99,9 @@ async def set_group_admin(
                 detail=ERROR_MESSAGES.DEFAULT("Invalid admin user ID"),
             )
 
-        # 设置管理员并确保该用户只在这一个组内
+        # 设置管理员并确保该用户在这个组内
         group = Groups.set_group_admin_by_id(id, form_data.admin_id)
-        Groups.ensure_user_in_single_group(form_data.admin_id, id)
+        Groups.add_user_to_group(form_data.admin_id, id)
 
         if group:
             return group
@@ -125,14 +125,13 @@ async def set_group_admin(
 
 @router.get("/admin-credit", response_model=dict)
 async def get_group_admin_credit(user=Depends(get_verified_user)):
-    """获取用户所在权限组管理员的积分"""
+    """获取用户所在权限组管理员的积分（按加入顺序优先）"""
     try:
-        # 获取用户所在的权限组
-        group = Groups.get_user_group(user.id)
+        # 获取用户所在的所有权限组（按加入时间排序）
+        groups = Groups.get_user_groups_ordered(user.id)
 
-        # 如果用户不在任何组内或组内没有设置管理员
-        if not group or not group.admin_id:
-            # 返回用户自己的积分
+        # 如果用户不在任何组内
+        if not groups:
             user_credit = Credits.get_credit_by_user_id(user.id)
             return {
                 "user_credit": user_credit.credit if user_credit else 0,
@@ -141,20 +140,57 @@ async def get_group_admin_credit(user=Depends(get_verified_user)):
                 "admin_name": None,
                 "group_id": None,
                 "group_name": None,
+                "groups": [],
             }
 
-        # 获取管理员信息
-        admin_user = Users.get_user_by_id(group.admin_id)
-        admin_credit = Credits.get_credit_by_user_id(group.admin_id)
+        # 找到第一个有管理员且管理员有积分的组
+        primary_group = None
+        admin_user = None
+        admin_credit = None
+
+        for group in groups:
+            if group.admin_id and group.admin_id != user.id:
+                temp_admin_credit = Credits.get_credit_by_user_id(group.admin_id)
+                if temp_admin_credit and float(temp_admin_credit.credit) > 0:
+                    primary_group = group
+                    admin_user = Users.get_user_by_id(group.admin_id)
+                    admin_credit = temp_admin_credit
+                    break
+
+        # 如果没有找到有效的管理员积分，使用第一个组
+        if not primary_group and groups:
+            primary_group = groups[0]
+            if primary_group.admin_id:
+                admin_user = Users.get_user_by_id(primary_group.admin_id)
+                admin_credit = Credits.get_credit_by_user_id(primary_group.admin_id)
+
         user_credit = Credits.get_credit_by_user_id(user.id)
 
         return {
             "user_credit": user_credit.credit if user_credit else 0,
             "admin_credit": admin_credit.credit if admin_credit else 0,
-            "admin_id": admin_user.id,
-            "admin_name": admin_user.name,
-            "group_id": group.id,
-            "group_name": group.name,
+            "admin_id": admin_user.id if admin_user else None,
+            "admin_name": admin_user.name if admin_user else None,
+            "group_id": primary_group.id if primary_group else None,
+            "group_name": primary_group.name if primary_group else None,
+            "groups": [
+                {
+                    "id": group.id,
+                    "name": group.name,
+                    "admin_id": group.admin_id,
+                    "admin_name": (
+                        Users.get_user_by_id(group.admin_id).name
+                        if group.admin_id
+                        else None
+                    ),
+                    "admin_credit": (
+                        Credits.get_credit_by_user_id(group.admin_id).credit
+                        if group.admin_id
+                        else 0
+                    ),
+                }
+                for group in groups
+            ],
         }
     except Exception as e:
         log.exception(f"Error getting group admin credit: {e}")
@@ -177,9 +213,9 @@ async def update_group_by_id(
         if form_data.user_ids:
             form_data.user_ids = Users.get_valid_user_ids(form_data.user_ids)
 
-            # 确保每个用户只在这一个组内
+            # 将每个用户添加到这个组内（允许多组）
             for user_id in form_data.user_ids:
-                Groups.ensure_user_in_single_group(user_id, id)
+                Groups.add_user_to_group(user_id, id)
 
         group = Groups.update_group_by_id(id, form_data)
         if group:
@@ -215,6 +251,129 @@ async def delete_group_by_id(id: str, user=Depends(get_admin_user)):
             )
     except Exception as e:
         log.exception(f"Error deleting group {id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
+
+
+############################
+# 用户组管理 API
+############################
+
+
+@router.post("/id/{group_id}/add-user/{user_id}", response_model=dict)
+async def add_user_to_group(
+    group_id: str, user_id: str, admin_user=Depends(get_admin_user)
+):
+    """将用户添加到权限组"""
+    try:
+        # 验证用户ID是否有效
+        user = Users.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Invalid user ID"),
+            )
+
+        # 验证组是否存在
+        group = Groups.get_group_by_id(group_id)
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.DEFAULT("Group not found"),
+            )
+
+        success = Groups.add_user_to_group(user_id, group_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"用户 {user.name} 已添加到组 {group.name}",
+                "user_id": user_id,
+                "group_id": group_id,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Failed to add user to group"),
+            )
+    except Exception as e:
+        log.exception(f"Error adding user {user_id} to group {group_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
+
+
+@router.post("/id/{group_id}/remove-user/{user_id}", response_model=dict)
+async def remove_user_from_group(
+    group_id: str, user_id: str, admin_user=Depends(get_admin_user)
+):
+    """将用户从权限组中移除"""
+    try:
+        # 验证用户ID是否有效
+        user = Users.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Invalid user ID"),
+            )
+
+        # 验证组是否存在
+        group = Groups.get_group_by_id(group_id)
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.DEFAULT("Group not found"),
+            )
+
+        success = Groups.remove_user_from_group(user_id, group_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"用户 {user.name} 已从组 {group.name} 中移除",
+                "user_id": user_id,
+                "group_id": group_id,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Failed to remove user from group"),
+            )
+    except Exception as e:
+        log.exception(f"Error removing user {user_id} from group {group_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
+
+
+@router.get("/user/{user_id}/groups", response_model=list)
+async def get_user_groups(user_id: str, admin_user=Depends(get_admin_user)):
+    """获取用户所在的所有权限组（按加入时间排序）"""
+    try:
+        # 验证用户ID是否有效
+        user = Users.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT("Invalid user ID"),
+            )
+
+        groups = Groups.get_user_groups_ordered(user_id)
+        return [
+            {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "admin_id": group.admin_id,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+            }
+            for group in groups
+        ]
+    except Exception as e:
+        log.exception(f"Error getting groups for user {user_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e),

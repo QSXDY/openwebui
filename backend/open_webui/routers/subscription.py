@@ -130,11 +130,11 @@ async def delete_plan(plan_id: str = Path(...), _: UserModel = Depends(get_admin
 # ============== 用户订阅接口 ==============
 
 
-@router.get("/users/{user_id}/subscription", summary="获取用户订阅详情")
+@router.get("/users/{user_id}/subscription", summary="获取用户当前订阅详情")
 async def get_user_subscription(
     user_id: str, user: UserModel = Depends(get_current_user)
 ):
-    """获取用户当前订阅状态"""
+    """获取用户当前活跃订阅状态"""
     # 检查权限（只能查看自己的订阅或管理员可查看所有）
     if user_id != user.id and user.role != "admin":
         raise HTTPException(
@@ -142,6 +142,47 @@ async def get_user_subscription(
         )
 
     return Subscriptions.get_user_subscription(user_id)
+
+
+@router.get(
+    "/users/{user_id}/subscriptions",
+    summary="获取用户所有订阅记录",
+    description="分页获取用户的所有订阅记录，包括活跃、过期和已取消的订阅",
+)
+async def get_user_all_subscriptions(
+    user_id: str = Path(..., description="用户ID"),
+    status: Optional[str] = Query(
+        None,
+        description="订阅状态过滤：active=活跃, cancelled=已取消, expired=已过期，不传=全部",
+    ),
+    page: int = Query(1, ge=1, description="页码"),
+    limit: int = Query(10, ge=1, le=50, description="每页数量"),
+    user: UserModel = Depends(get_current_user),
+):
+    """
+    获取用户的所有订阅记录
+
+    支持功能：
+    - 分页查询
+    - 状态过滤
+    - 包含套餐详细信息
+    - 显示剩余天数和状态摘要
+    """
+    # 检查权限（只能查看自己的订阅或管理员可查看所有）
+    if user_id != user.id and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人订阅信息"
+        )
+
+    try:
+        return Subscriptions.get_user_all_subscriptions(
+            user_id=user_id, status=status, page=page, limit=limit
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取订阅列表失败: {str(e)}",
+        )
 
 
 @router.post(

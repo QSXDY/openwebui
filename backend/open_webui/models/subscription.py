@@ -625,6 +625,110 @@ class SubscriptionsTable:
         except Exception:
             return []
 
+    def get_user_all_subscriptions(
+        self, user_id: str, status: Optional[str] = None, page: int = 1, limit: int = 10
+    ) -> Dict[str, Any]:
+        """获取用户的所有订阅记录（包含套餐信息）"""
+        try:
+            with get_db() as db:
+                # 构建查询
+                query = db.query(Subscription).filter(Subscription.user_id == user_id)
+
+                # 如果指定了状态，添加状态过滤
+                if status:
+                    query = query.filter(Subscription.status == status)
+
+                # 计算总数
+                total = query.count()
+
+                # 分页查询，按创建时间倒序
+                subscriptions = (
+                    query.order_by(Subscription.created_at.desc())
+                    .offset((page - 1) * limit)
+                    .limit(limit)
+                    .all()
+                )
+
+                # 获取所有相关的套餐信息
+                plan_ids = list(
+                    set([sub.plan_id for sub in subscriptions if sub.plan_id])
+                )
+                plans_dict = {}
+                if plan_ids:
+                    plans = db.query(Plan).filter(Plan.id.in_(plan_ids)).all()
+                    plans_dict = {
+                        plan.id: PlanModel.model_validate(
+                            {
+                                c.name: getattr(plan, c.name)
+                                for c in plan.__table__.columns
+                            }
+                        ).model_dump()
+                        for plan in plans
+                    }
+
+                # 构建订阅列表（包含套餐信息）
+                subscription_list = []
+                current_time = int(time.time())
+
+                for subscription in subscriptions:
+                    # 判断订阅状态
+                    is_active = (
+                        subscription.status == "active"
+                        and subscription.end_date > current_time
+                    )
+                    is_expired = subscription.end_date <= current_time
+
+                    sub_data = {
+                        "id": subscription.id,
+                        "user_id": subscription.user_id,
+                        "plan_id": subscription.plan_id,
+                        "plan": plans_dict.get(subscription.plan_id),
+                        "status": subscription.status,
+                        "start_date": subscription.start_date,
+                        "end_date": subscription.end_date,
+                        "created_at": subscription.created_at,
+                        "updated_at": subscription.updated_at,
+                        "is_active": is_active,
+                        "is_expired": is_expired,
+                        "days_remaining": (
+                            max(0, (subscription.end_date - current_time) // 86400)
+                            if not is_expired
+                            else 0
+                        ),
+                    }
+                    subscription_list.append(sub_data)
+
+                return {
+                    "success": True,
+                    "data": {
+                        "subscriptions": subscription_list,
+                        "pagination": {
+                            "page": page,
+                            "limit": limit,
+                            "total": total,
+                            "total_pages": (total + limit - 1) // limit,
+                        },
+                        "summary": {
+                            "total_subscriptions": total,
+                            "active_subscriptions": len(
+                                [s for s in subscription_list if s["is_active"]]
+                            ),
+                            "expired_subscriptions": len(
+                                [s for s in subscription_list if s["is_expired"]]
+                            ),
+                            "cancelled_subscriptions": len(
+                                [
+                                    s
+                                    for s in subscription_list
+                                    if s["status"] == "cancelled"
+                                ]
+                            ),
+                        },
+                    },
+                }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"获取订阅列表失败: {str(e)}")
+
     def update_subscription(self, subscription_id: str, **kwargs) -> Dict[str, Any]:
         """修改订阅信息"""
         try:
