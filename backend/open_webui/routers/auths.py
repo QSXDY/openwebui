@@ -488,7 +488,7 @@ class WeChatFollowService:
         """发送文本消息给微信用户"""
         try:
             access_token = await WeChatFollowService.get_access_token(request)
-
+            log.info(f"access_token: {content}")
             # 替换消息中的变量
             webui_url = request.app.state.config.WEBUI_URL
             content = content.replace("{WEBUI_URL}", webui_url)
@@ -2363,11 +2363,11 @@ class AdminConfig(BaseModel):
     # 添加微信消息推送配置
     WECHAT_WELCOME_ENABLED: bool = Field(default=True)
     WECHAT_WELCOME_MESSAGE: str = Field(
-        default="🎉 欢迎关注！\n\n您已成功关注我们的公众号，现在可以使用微信快速登录我们的AI平台了！\n\n✨ 功能特色：\n• 微信快捷登录\n• 智能AI对话\n• 多模型支持\n\n点击菜单或发送消息开始体验吧！"
+        default="欢迎关注！\n\n您已成功关注我们的公众号，现在可以使用微信快速登录我们的AI平台了！\n\n 功能特色：\n• 微信快捷登录\n• 智能AI对话\n• 多模型支持\n\n点击菜单或发送消息开始体验吧！"
     )
     WECHAT_AUTO_REPLY_ENABLED: bool = Field(default=True)
     WECHAT_DEFAULT_REPLY_MESSAGE: str = Field(
-        default="🤖 您好！\n\n感谢您的消息。如需使用完整AI功能，请访问我们的网站进行体验。\n\n🌐 网站地址：{WEBUI_URL}\n\n您也可以点击菜单中的「AI对话」直接开始体验！"
+        default="您好！\n\n感谢您的消息。如需使用完整AI功能，请访问我们的网站进行体验。\n\n网站地址：{WEBUI_URL}\n\n您也可以点击菜单中的「AI对话」直接开始体验！"
     )
     WECHAT_KEYWORD_REPLIES: List[dict] = Field(default=[])
 
