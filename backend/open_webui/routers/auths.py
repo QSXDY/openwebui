@@ -488,7 +488,8 @@ class WeChatFollowService:
         """发送文本消息给微信用户"""
         try:
             access_token = await WeChatFollowService.get_access_token(request)
-            log.info(f"access_token: {content}")
+            log.info(f"获取access_token成功")
+
             # 替换消息中的变量
             webui_url = request.app.state.config.WEBUI_URL
             content = content.replace("{WEBUI_URL}", webui_url)
@@ -523,18 +524,32 @@ class WeChatFollowService:
             log.info(f"准备发送消息给用户 {openid}，内容: {content}")
 
             async with ClientSession() as session:
-                # 确保使用UTF-8编码发送JSON
+                # 手动序列化JSON，确保UTF-8编码且不转义Unicode字符
+                import json
+
+                json_data = json.dumps(
+                    message_data, ensure_ascii=False, separators=(",", ":")
+                )
+
                 async with session.post(
                     send_url,
-                    json=message_data,
-                    headers={"Content-Type": "application/json; charset=utf-8"},
+                    data=json_data.encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json; charset=utf-8",
+                        "Accept": "application/json",
+                    },
                 ) as response:
                     result = await response.json()
+                    log.info(f"发送响应: {result}")
                     if result.get("errcode") == 0:
                         log.info(f"成功发送消息给用户 {openid}")
                         return True
                     else:
                         log.error(f"发送消息失败: {result}")
+                        # 记录更详细的错误信息
+                        error_code = result.get("errcode")
+                        error_msg = result.get("errmsg", "未知错误")
+                        log.error(f"错误代码: {error_code}, 错误信息: {error_msg}")
                         return False
         except Exception as e:
             log.error(f"发送微信消息异常: {str(e)}")
