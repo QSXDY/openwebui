@@ -902,7 +902,11 @@ export const checkWeChatFollowStatus = async (scene_id: string) => {
 };
 
 // 绑定手机号
-export const bindPhoneNumber = async (phone_number: string, verification_code: string, token: string) => {
+export const bindPhoneNumber = async (
+	phone_number: string,
+	verification_code: string,
+	token: string
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/bind/phone`, {

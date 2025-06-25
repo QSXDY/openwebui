@@ -5,16 +5,19 @@
 ## 🚀 新功能特性
 
 ### 1. 多种登录方式支持
+
 - **邮箱登录** - 传统的邮箱密码登录
-- **手机号登录** - 手机号 + 短信验证码登录  
+- **手机号登录** - 手机号 + 短信验证码登录
 - **微信登录** - 微信公众号关注登录
 
 ### 2. 账号绑定功能
+
 - 不同登录方式之间可以互相绑定
 - 支持一个用户使用多种方式登录
 - 灵活的绑定状态管理
 
 ### 3. 数据库结构优化
+
 - 新增 `user_bindings` 表管理绑定关系
 - 扩展 `auth` 表支持多种认证方式
 - 扩展 `user` 表支持绑定信息
@@ -22,6 +25,7 @@
 ## 📊 数据库表结构
 
 ### auth 表 (认证表)
+
 ```sql
 CREATE TABLE auth (
     id VARCHAR PRIMARY KEY,
@@ -39,6 +43,7 @@ CREATE TABLE auth (
 ```
 
 ### user 表 (用户表)
+
 ```sql
 CREATE TABLE user (
     id VARCHAR PRIMARY KEY,
@@ -58,6 +63,7 @@ CREATE TABLE user (
 ```
 
 ### user_bindings 表 (绑定关系表)
+
 ```sql
 CREATE TABLE user_bindings (
     id VARCHAR PRIMARY KEY,
@@ -76,6 +82,7 @@ CREATE TABLE user_bindings (
 ## 🛠️ 迁移方法
 
 ### 方法一：增量迁移（现有数据库）
+
 如果你已经有现有的数据库，使用增量迁移：
 
 ```bash
@@ -86,11 +93,13 @@ python -m alembic upgrade head
 这会执行 `b1a2c3d4e5f6_add_user_bindings_and_login_methods.py` 迁移文件。
 
 ### 方法二：完整初始化（新部署）
+
 对于新部署，可以使用完整的初始化脚本（推荐）：
 
 1. 确保没有现有数据库表
 2. 复制 `z_init_complete_schema.py` 并重命名为合适的版本号
 3. 运行迁移：
+
 ```bash
 python -m alembic upgrade head
 ```
@@ -100,6 +109,7 @@ python -m alembic upgrade head
 ### 新增的接口
 
 #### 1. 绑定手机号
+
 ```http
 POST /api/v1/auths/bind/phone
 Authorization: Bearer {token}
@@ -112,6 +122,7 @@ Content-Type: application/json
 ```
 
 #### 2. 绑定微信
+
 ```http
 POST /api/v1/auths/bind/wechat
 Authorization: Bearer {token}
@@ -124,6 +135,7 @@ Content-Type: application/json
 ```
 
 #### 3. 微信公众号关注登录
+
 ```http
 POST /api/v1/auths/wechat/follow-login
 Content-Type: application/json
@@ -135,6 +147,7 @@ Content-Type: application/json
 ```
 
 #### 4. 检查微信关注状态
+
 ```http
 GET /api/v1/auths/wechat/check/{scene_id}
 ```
@@ -142,7 +155,9 @@ GET /api/v1/auths/wechat/check/{scene_id}
 ### 更新的接口
 
 #### 短信验证码发送
+
 现在支持绑定类型：
+
 ```http
 POST /api/v1/auths/sms/send
 Content-Type: application/json
@@ -156,16 +171,18 @@ Content-Type: application/json
 ## 🔧 配置更新
 
 ### 微信公众号配置
+
 在配置中添加微信公众号相关设置：
 
 ```python
 # 微信公众号配置
 WECHAT_APP_ID = "your_app_id"
-WECHAT_APP_SECRET = "your_app_secret"  
+WECHAT_APP_SECRET = "your_app_secret"
 ENABLE_WECHAT_LOGIN = True
 ```
 
 ### 短信服务配置
+
 ```python
 # 阿里云短信配置
 SMS_ACCESS_KEY_ID = "your_key_id"
@@ -178,22 +195,27 @@ SMS_ENDPOINT = "dysmsapi.aliyuncs.com"
 ## 🚨 注意事项
 
 ### 1. 数据迁移安全
+
 - 在生产环境迁移前，请先备份数据库
 - 建议先在测试环境验证迁移脚本
 
 ### 2. 微信公众号设置
+
 - 需要配置微信公众号的服务器URL
 - 设置微信推送事件的接收接口: `/api/v1/auths/wechat/follow-event`
 
 ### 3. 绑定逻辑
+
 - 用户可以有多种登录方式，但有一个主要登录方式
 - 绑定关系通过 `user_bindings` 表管理
 - 删除用户时需要清理相关的绑定关系
 
 ### 4. 索引优化
+
 新增的索引可以提高查询性能：
+
 - `ix_auth_login_type` - 按登录类型查询
-- `ix_auth_phone_number` - 按手机号查询  
+- `ix_auth_phone_number` - 按手机号查询
 - `ix_auth_wechat_openid` - 按微信openid查询
 - `ix_user_bindings_*` - 绑定关系查询
 
@@ -202,16 +224,18 @@ SMS_ENDPOINT = "dysmsapi.aliyuncs.com"
 ### 常见问题
 
 1. **迁移失败**
+
    - 检查数据库连接
    - 确认权限足够
    - 查看错误日志
 
 2. **绑定功能异常**
+
    - 检查短信服务配置
    - 验证微信公众号设置
    - 查看网络连接
 
-3. **登录问题** 
+3. **登录问题**
    - 确认用户数据迁移正确
    - 检查绑定状态
    - 验证认证逻辑
@@ -227,4 +251,4 @@ SMS_ENDPOINT = "dysmsapi.aliyuncs.com"
 
 - [微信公众平台开发文档](https://developers.weixin.qq.com/doc/)
 - [阿里云短信服务文档](https://help.aliyun.com/product/44282.html)
-- [Alembic迁移文档](https://alembic.sqlalchemy.org/) 
+- [Alembic迁移文档](https://alembic.sqlalchemy.org/)
