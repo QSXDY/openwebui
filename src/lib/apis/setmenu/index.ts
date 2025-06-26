@@ -910,6 +910,41 @@ export const usersubscriptionmenu = async (token: string, user_id: string) => {
 	return res;
 };
 
+export const usersubscriptionmenus = async (
+	token: string,
+	user_id: string,
+	status: string,
+	page: number,
+	limit: number
+) => {
+	let error = null;
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/subscription/users/${user_id}/subscriptions?status=${status}&page=${page}&limit=${limit}`,
+		{
+			method: 'GET',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.log(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 // 订购套餐
 export const subscriptionPurchase = async (token: string, id: string, type: string) => {
 	let error = null;
