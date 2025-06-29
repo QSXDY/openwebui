@@ -180,4 +180,4 @@ python -m alembic upgrade head
 1. `DATABASE_MIGRATION_GUIDE.md` - 详细的迁移指南
 2. 系统日志文件
 3. 数据库迁移状态
-4. 微信公众号配置状态 
+4. 微信公众号配置状态

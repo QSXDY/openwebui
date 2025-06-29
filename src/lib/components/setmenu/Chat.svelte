@@ -6,7 +6,7 @@
 	import ConfirmDialog from '$lib/components/common/ExchangeDialog.svelte';
 	import AdminDialog from '$lib/components/common/AdminDialog.svelte';
 	import PaymentDialog from '$lib/components/common/PaymentDialog.svelte';
-	import { getUsers, usersubscriptionmenu, subscriptionprocess } from '$lib/apis/setmenu';
+	import { getUsers, usersubscriptionmenus, subscriptionprocess } from '$lib/apis/setmenu';
 
 	const i18n = getContext('i18n');
 
@@ -17,51 +17,47 @@
 	let untype = '个人';
 	let suntype = '个1人';
 	let menus: any[] = [];
+	let menuslist: any[] = [];
+	let menlist: any[] = [];
 	let frmoMenu = null;
 
 	const usermenu = async () => {
 		try {
-			const res = await usersubscriptionmenu(localStorage.token, $user.id).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+			const res = await usersubscriptionmenus(localStorage.token, $user.id, 'active', 1, 50).catch(
+				(error) => {
+					toast.error(`${error}`);
+					return null;
+				}
+			);
 
 			if (res) {
-				if (res.subscription.plan == null) {
+				if (res.data.subscriptions.length == 0) {
 					return;
 				}
-				const unmatchedPlans = [res.subscription.plan];
-				const processedPlans = unmatchedPlans.map((plan) => ({
-					...plan,
-					user_plan: 2
-				}));
-				const menusPlans = menus.map((plan) => ({
-					...plan,
-					user_plan: 0
-				}));
-				// 1. 将当前订购的套餐转换为 Map，便于快速查找
-				const processedPlanMap = new Map(
-					processedPlans.map((plan) => [plan.id, { ...plan, user_plan: 1 }])
-				);
-
-				// 2. 处理套餐列表：匹配的套餐标记为已订购，未匹配的保持原样
-				const matchedMenus = menusPlans.map((menu) => {
-					if (processedPlanMap.has(menu.id)) {
-						// 如果套餐列表中的套餐存在于当前订购中，标记为已订购
-						const matchedPlan = processedPlanMap.get(menu.id);
-						processedPlanMap.delete(menu.id); // 删除已匹配的，剩余的是需要新增的
-						return { ...menu, ...matchedPlan, user_plan: 1 };
-					}
-					return menu; // 未匹配的保持原样
+				const unmatchedPlans = res.data.subscriptions;
+				menuslist = unmatchedPlans.map((menu) => {
+					return {
+						...menu.plan,
+						user_plan: 1
+					};
 				});
-
-				// 3. 将未在套餐列表中出现的当前订购套餐添加到列表首位
-				const newMenus = [
-					...Array.from(processedPlanMap.values()), // 新增的套餐（未在原列表中）
-					...matchedMenus // 处理后的原套餐列表
-				];
-				menus = newMenus;
-				console.log('套餐套餐我的', newMenus);
+				const menlist = [...menuslist];
+				menus.forEach((menu) => {
+					if (!menlist.some((m) => m.id === menu.id)) {
+						menlist.push(menu);
+					}
+				});
+				menlist.map((item) => {
+					if (!('user_plan' in item)) {
+						return {
+							...item,
+							user_plan: 0
+						};
+					}
+					return item;
+				});
+				menus = menlist;
+				console.log('我的套餐！！！：', menlist);
 			}
 		} catch (err) {
 			console.error(err);
@@ -90,7 +86,6 @@
 		loaded = true;
 		menuList();
 	});
-
 	const nihasd = async () => {
 		try {
 			const res = await subscriptionprocess(localStorage.token).catch((error) => {
