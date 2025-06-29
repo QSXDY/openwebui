@@ -17,6 +17,7 @@
 		weChatFollowLogin,
 		checkWeChatFollowStatus,
 		bindPhoneNumber,
+		smsSignin,
 		bindWeChat
 	} from '$lib/apis/auths';
 
@@ -97,6 +98,15 @@
 		await setSessionUser(sessionUser);
 	};
 
+		const smssignInHandler = async () => {
+		const sessionUser = await smsSignin(phone, phonecode).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		await setSessionUser(sessionUser);
+	};
+
 	const signUpHandler = async () => {
 		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
 			(error) => {
@@ -134,8 +144,9 @@
 			if (login === 'email') {
 				await signInHandler();
 			} else {
-				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
-				console.log('手机号登录ldap');
+				// return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+				// console.log('手机号登录ldap');
+					await smssignInHandler(); 
 			}
 		} else {
 			if (login === 'email') {
