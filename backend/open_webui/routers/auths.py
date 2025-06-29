@@ -1683,10 +1683,10 @@ async def register_with_wechat_binding(
     pending_data = pending_phone_registrations[phone_number]
 
     # 验证验证码（为手机注册用户绑定微信时需要再次验证手机号）
-    if not verify_code(phone_number, verification_code, "bind"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
-        )
+    # if not verify_code(phone_number, verification_code, "bind"):
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
+    #     )
 
     # 检查手机号是否已注册
     phone_email = f"{phone_number}@sms.local"
