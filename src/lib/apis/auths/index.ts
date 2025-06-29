@@ -352,6 +352,46 @@ export const userSignUp = async (
 	return res;
 };
 
+export const smsSignUp = async (
+	name: string,
+	phone: string,
+	password: string,
+	phonecode: string,
+	profile_image_url: string
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/sms/register`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		credentials: 'include',
+		body: JSON.stringify({
+			name: name,
+			phone_number: phone,
+			password: password,
+			verification_code: phonecode,
+			profile_image_url: profile_image_url
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.log(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const userSignOut = async () => {
 	let error = null;
 
@@ -430,6 +470,37 @@ export const updateUserProfile = async (token: string, name: string, profileImag
 		body: JSON.stringify({
 			name: name,
 			profile_image_url: profileImageUrl
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.log(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateUserProfiles = async (token: string, openid: string, scene_id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/bind/wechat`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({
+			openid: openid,
+			scene_id: scene_id,
 		})
 	})
 		.then(async (res) => {

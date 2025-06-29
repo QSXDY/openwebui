@@ -11,6 +11,7 @@
 		getSessionUser,
 		userSignIn,
 		userSignUp,
+		smsSignUp,
 		smsSendsend,
 		getWeChatQRCode,
 		weChatFollowLogin,
@@ -108,7 +109,7 @@
 	};
 
 	const phoneUpHandler = async () => {
-		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
+		const sessionUser = await smsSignUp(name, phone, password, phonecode,generateInitialsImage(name)).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;
@@ -140,7 +141,7 @@
 			if (login === 'email') {
 				await signUpHandler();
 			} else {
-				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+				// return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
 				await phoneUpHandler();
 			}
 		}

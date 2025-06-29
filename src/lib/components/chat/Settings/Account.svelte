@@ -6,6 +6,7 @@
 	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
 	import Credit from './Credit.svelte';
 	import UpdatePassword from './Account/UpdatePassword.svelte';
+	import UpdateWeChat from './Account/UpdateWeChat.svelte';
 	import { getGravatarUrl } from '$lib/apis/utils';
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils';
@@ -247,6 +248,11 @@
 					</div>
 				</div>
 			</div>
+			<hr class="border-gray-50 dark:border-gray-850 my-2" />
+			<div class="my-2">
+				<UpdateWeChat />
+			</div>
+			<hr class="border-gray-50 dark:border-gray-850 my-2" />
 			<Credit />
 			<!-- {#if $config?.features?.enable_user_webhooks} -->
 			{#if false}
