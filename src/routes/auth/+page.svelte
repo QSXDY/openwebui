@@ -12,11 +12,13 @@
 		userSignIn,
 		userSignUp,
 		smsSendsend,
+		smsRegister,
 		getWeChatQRCode,
 		weChatFollowLogin,
 		checkWeChatFollowStatus,
 		bindPhoneNumber,
-		bindWeChat
+		bindWeChat,
+		registerWithWeChatBinding
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -53,6 +55,10 @@
 	let qrCodeExpired = false;
 	let needBindPhone = false; // 是否需要绑定手机号
 	let showBindPhoneModal = false; // 显示绑定手机号弹窗
+	
+	// 新增：手机号注册待绑定微信的状态
+	let pendingPhoneRegistration = null; // 存储待绑定微信的手机号注册信息
+	let showWeChatBindingModal = false; // 显示微信绑定弹窗
 	const querystringValue = (key) => {
 		const querystring = window.location.search;
 		const urlParams = new URLSearchParams(querystring);
@@ -107,16 +113,7 @@
 		await setSessionUser(sessionUser);
 	};
 
-	const phoneUpHandler = async () => {
-		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
 
-		await setSessionUser(sessionUser);
-	};
 
 	const ldapSignInHandler = async () => {
 		const sessionUser = await ldapUserSignIn(ldapUsername, password).catch((error) => {
@@ -139,10 +136,43 @@
 		} else {
 			if (login === 'email') {
 				await signUpHandler();
+			} else if (login === 'phone') {
+				// 手机号注册流程
+				await phoneRegisterHandler();
 			} else {
-				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
-				await phoneUpHandler();
+				return toast.error(`目前处于内部测试阶段，暂时无法使用。`,);
 			}
+		}
+	};
+
+	// 新增：手机号注册处理函数
+	const phoneRegisterHandler = async () => {
+		if (!name || !phone || !phonecode || !password) {
+			toast.error('请填写完整的注册信息');
+			return;
+		}
+
+		try {
+			const result = await smsRegister(phone, phonecode, password, name);
+			
+			if (result.success && result.require_wechat_binding) {
+				// 需要绑定微信才能完成注册
+				pendingPhoneRegistration = {
+					phone_number: result.phone_number,
+					name: name,
+					password: password
+				};
+				showWeChatBindingModal = true;
+				toast.success('手机号验证成功，请扫描微信二维码完成注册');
+				
+				// 获取微信二维码用于绑定
+				await getWeChatQRForBinding();
+			} else {
+				// 如果后端逻辑改变，直接注册成功的情况
+				await setSessionUser(result);
+			}
+		} catch (error) {
+			toast.error(`注册失败: ${error}`);
 		}
 	};
 
@@ -255,6 +285,87 @@
 		}
 	};
 
+	// 新增：获取微信二维码用于绑定
+	const getWeChatQRForBinding = async () => {
+		try {
+			const response = await getWeChatQRCode();
+			if (response) {
+				wechatQRCode = response.qr_code;
+				wechatSceneId = response.scene_id;
+				qrCodeExpired = false;
+				startWeChatPollingForBinding();
+
+				// 设置二维码过期时间
+				setTimeout(() => {
+					if (!qrCodeExpired) {
+						qrCodeExpired = true;
+						stopWeChatPolling();
+					}
+				}, response.expires_in * 1000);
+			}
+		} catch (error) {
+			console.error('获取微信绑定二维码失败:', error);
+			toast.error(`获取微信二维码失败: ${error}`);
+		}
+	};
+
+	// 新增：开始轮询微信关注状态（用于注册绑定）
+	const startWeChatPollingForBinding = () => {
+		if (wechatPolling) return;
+
+		wechatPolling = true;
+		wechatPollingInterval = setInterval(async () => {
+			try {
+				const response = await checkWeChatFollowStatus(wechatSceneId);
+				if (response && response.status === 'followed' && response.openid) {
+					stopWeChatPolling();
+					
+					// 处理微信绑定注册
+					if (pendingPhoneRegistration) {
+						try {
+							// 调用绑定注册接口
+							const sessionUser = await registerWithWeChatBinding(
+								response.openid,
+								wechatSceneId,
+								pendingPhoneRegistration.phone_number,
+								phonecode, // 需要再次验证验证码
+								pendingPhoneRegistration.name,
+								pendingPhoneRegistration.password
+							);
+							
+							// 清理状态
+							pendingPhoneRegistration = null;
+							showWeChatBindingModal = false;
+							
+							await setSessionUser(sessionUser);
+							toast.success('注册成功！手机号和微信已绑定');
+						} catch (bindingError) {
+							console.error('微信绑定注册失败:', bindingError);
+							toast.error(`绑定注册失败: ${bindingError}`);
+							// 重新获取二维码
+							setTimeout(() => {
+								getWeChatQRForBinding();
+							}, 1000);
+						}
+					}
+				} else if (response && response.status === 'expired') {
+					stopWeChatPolling();
+					qrCodeExpired = true;
+				} else if (response && response.status === 'not_found') {
+					stopWeChatPolling();
+					toast.error('登录状态已失效，请重新获取二维码');
+					qrCodeExpired = true;
+				}
+			} catch (error) {
+				console.error('微信关注状态检查失败:', error);
+				if (error.toString().includes('not_found')) {
+					stopWeChatPolling();
+					qrCodeExpired = true;
+				}
+			}
+		}, 2000); // 每2秒检查一次
+	};
+
 	// 开始轮询微信关注状态
 	const startWeChatPolling = () => {
 		if (wechatPolling) return;
@@ -308,7 +419,21 @@
 	// 刷新微信二维码
 	const refreshWeChatQR = () => {
 		stopWeChatPolling();
-		getWeChatQR();
+		if (showWeChatBindingModal) {
+			getWeChatQRForBinding();
+		} else {
+			getWeChatQR();
+		}
+	};
+
+	// 新增：取消微信绑定
+	const cancelWeChatBinding = () => {
+		stopWeChatPolling();
+		showWeChatBindingModal = false;
+		pendingPhoneRegistration = null;
+		wechatQRCode = '';
+		wechatSceneId = '';
+		qrCodeExpired = false;
 	};
 
 	// 当切换到微信登录时获取二维码
@@ -382,6 +507,10 @@
 	// 组件销毁时清理轮询
 	onDestroy(() => {
 		stopWeChatPolling();
+		// 清理微信绑定状态
+		if (showWeChatBindingModal) {
+			cancelWeChatBinding();
+		}
 	});
 </script>
 
@@ -973,6 +1102,88 @@
 				>
 					绑定手机号
 				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 微信绑定弹窗（用于手机号注册） -->
+{#if showWeChatBindingModal}
+	<div class="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50">
+		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 shadow-2xl">
+			<div class="text-center mb-6">
+				<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">绑定微信完成注册</h2>
+				<p class="text-sm text-gray-600 dark:text-gray-400">手机号已验证，请扫描下方二维码绑定微信</p>
+			</div>
+
+			<div class="flex flex-col items-center">
+				{#if wechatQRCode && !qrCodeExpired}
+					<div class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600">
+						<img src={wechatQRCode} alt="微信绑定二维码" class="w-48 h-48" />
+					</div>
+
+					{#if wechatPolling}
+						<div class="flex items-center mt-4 text-sm text-gray-600 dark:text-gray-400">
+							<Spinner class="w-4 h-4 mr-2" />
+							<span class="animate-pulse">等待关注公众号中...</span>
+						</div>
+					{/if}
+				{:else if qrCodeExpired}
+					<div class="text-center">
+						<div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+							<div class="text-red-600 dark:text-red-400 text-sm font-medium">
+								⚠️ 二维码已过期
+							</div>
+							<div class="text-red-500 dark:text-red-300 text-xs mt-1">
+								请点击下方按钮重新获取二维码
+							</div>
+						</div>
+						<button
+							on:click={refreshWeChatQR}
+							class="bg-green-500 hover:bg-green-600 text-white transition rounded-full font-medium text-sm py-2 px-6 shadow-md hover:shadow-lg"
+						>
+							🔄 刷新二维码
+						</button>
+					</div>
+				{:else}
+					<div class="flex flex-col items-center">
+						<div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 mb-4 w-48 h-48 flex items-center justify-center">
+							<div class="text-center">
+								<Spinner class="w-8 h-8 mx-auto mb-2" />
+								<div class="text-sm text-gray-600 dark:text-gray-400">
+									正在生成二维码...
+								</div>
+							</div>
+						</div>
+					</div>
+				{/if}
+
+				<div class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs leading-relaxed">
+					💡 请使用微信扫描上方二维码关注公众号，关注成功后即可完成注册
+				</div>
+
+				{#if wechatPolling}
+					<div class="mt-2 text-xs text-blue-600 dark:text-blue-400 text-center">
+						二维码有效期：10分钟
+					</div>
+				{/if}
+			</div>
+
+			<div class="flex gap-3 mt-6">
+				<button
+					on:click={cancelWeChatBinding}
+					class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium text-sm transition hover:bg-gray-50 dark:hover:bg-gray-700"
+				>
+					取消绑定
+				</button>
+				{#if qrCodeExpired}
+					<button
+						on:click={refreshWeChatQR}
+						class="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium text-sm transition"
+					>
+						刷新二维码
+					</button>
+				{/if}
 			</div>
 		</div>
 	</div>

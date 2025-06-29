@@ -967,6 +967,47 @@ export const bindWeChat = async (openid: string, scene_id: string, token: string
 	return res;
 };
 
+// 手机号注册绑定微信
+export const registerWithWeChatBinding = async (
+	openid: string, 
+	scene_id: string, 
+	phone_number: string, 
+	verification_code: string,
+	name: string,
+	password: string
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/register/wechat`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			openid: openid,
+			scene_id: scene_id,
+			phone_number: phone_number,
+			verification_code: verification_code,
+			name: name,
+			password: password
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 // 兼容性：保留旧的接口名称
 export const weChatLogin = weChatFollowLogin;
 export const checkWeChatLoginStatus = checkWeChatFollowStatus;

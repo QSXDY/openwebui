@@ -123,6 +123,9 @@ class PKCS7Encoder:
 # 短信验证码存储（生产环境建议使用Redis）
 sms_verification_codes = {}
 
+# 临时存储已验证手机号的注册信息（等待绑定微信）
+pending_phone_registrations = {}
+
 
 # 短信服务配置类
 class SMSConfig:
@@ -175,6 +178,10 @@ class BindPhoneForm(BaseModel):
 class BindWeChatForm(BaseModel):
     openid: str = Field(..., description="微信openid")
     scene_id: str = Field(..., description="场景值")
+    phone_number: Optional[str] = Field(None, description="待绑定的手机号")
+    verification_code: Optional[str] = Field(None, description="手机验证码")
+    name: Optional[str] = Field(None, description="用户姓名")
+    password: Optional[str] = Field(None, description="密码")
 
 
 # 短信服务类
@@ -828,11 +835,11 @@ async def send_sms_verification(request: Request, form_data: SendSMSForm):
         )
 
 
-@router.post("/sms/register", response_model=SessionUserResponse)
+@router.post("/sms/register")
 async def sms_register(
     request: Request, response: Response, form_data: SMSRegisterForm
 ):
-    """短信验证码注册"""
+    """短信验证码注册 - 验证手机号后要求绑定微信"""
     phone_number = form_data.phone_number.strip()
     verification_code = form_data.verification_code.strip()
 
@@ -855,79 +862,29 @@ async def sms_register(
             status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已注册"
         )
 
-    try:
-        user_count = Users.get_num_users()
-        role = (
-            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-        )
+    # 将已验证的手机号信息存储到临时字典中，等待微信绑定
+    pending_phone_registrations[phone_number] = {
+        "name": form_data.name,
+        "password": form_data.password,
+        "timestamp": time.time(),
+        "verified": True,
+    }
 
-        # 创建新用户
-        hashed = get_password_hash(form_data.password)
-        user = Auths.insert_new_auth(
-            email=email,
-            password=hashed,
-            name=form_data.name,
-            role=role,
-        )
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=ERROR_MESSAGES.CREATE_USER_ERROR,
-            )
-
-    except Exception as err:
-        log.error(f"短信注册创建用户失败: {str(err)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="用户创建失败"
-        )
-
-    # 生成JWT令牌
-    expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-    expires_at = None
-    if expires_delta:
-        expires_at = int(time.time()) + int(expires_delta.total_seconds())
-
-    token = create_token(
-        data={"id": user.id},
-        expires_delta=expires_delta,
-    )
-
-    datetime_expires_at = (
-        datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-        if expires_at
-        else None
-    )
-
-    # 设置Cookie
-    response.set_cookie(
-        key="token",
-        value=token,
-        expires=datetime_expires_at,
-        httponly=True,
-        samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-        secure=WEBUI_AUTH_COOKIE_SECURE,
-    )
-
-    # 获取用户权限
-    user_permissions = get_permissions(
-        user.id, request.app.state.config.USER_PERMISSIONS
-    )
-
-    # 初始化用户积分
-    credit = Credits.init_credit_by_user_id(user.id)
+    # 清理超过30分钟的临时数据
+    current_time = time.time()
+    expired_phones = [
+        phone
+        for phone, data in pending_phone_registrations.items()
+        if current_time - data["timestamp"] > 1800  # 30分钟
+    ]
+    for phone in expired_phones:
+        del pending_phone_registrations[phone]
 
     return {
-        "token": token,
-        "token_type": "Bearer",
-        "expires_at": expires_at,
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "role": user.role,
-        "profile_image_url": user.profile_image_url,
-        "permissions": user_permissions,
-        "credit": credit.credit,
+        "success": True,
+        "message": "手机号验证成功，请绑定微信完成注册",
+        "require_wechat_binding": True,
+        "phone_number": phone_number,
     }
 
 
@@ -1563,7 +1520,10 @@ async def bind_phone_number(
 
 @router.post("/bind/wechat")
 async def bind_wechat(
-    request: Request, form_data: BindWeChatForm, user=Depends(get_current_user)
+    request: Request,
+    response: Response,
+    form_data: BindWeChatForm,
+    user=Depends(get_current_user),
 ):
     """绑定微信"""
     openid = form_data.openid.strip()
@@ -1671,6 +1631,165 @@ async def bind_wechat(
 
     except Exception as e:
         log.error(f"绑定微信失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="绑定失败"
+        )
+
+
+############################
+# 手机号注册绑定微信接口
+############################
+
+
+@router.post("/register/wechat", response_model=SessionUserResponse)
+async def register_with_wechat_binding(
+    request: Request, response: Response, form_data: BindWeChatForm
+):
+    """手机号注册用户绑定微信完成注册"""
+    if not (
+        form_data.phone_number
+        and form_data.verification_code
+        and form_data.name
+        and form_data.password
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="缺少必要的注册信息"
+        )
+
+    openid = form_data.openid.strip()
+    scene_id = form_data.scene_id.strip()
+    phone_number = form_data.phone_number.strip()
+    verification_code = form_data.verification_code.strip()
+
+    # 验证场景值
+    if not WeChatFollowService.validate_scene_id(scene_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="无效的场景值或已过期"
+        )
+
+    # 验证手机号格式
+    if not validate_phone_number(phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
+        )
+
+    # 检查是否有待绑定的手机号数据
+    if phone_number not in pending_phone_registrations:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手机号验证已过期，请重新验证",
+        )
+
+    pending_data = pending_phone_registrations[phone_number]
+
+    # 验证验证码（为手机注册用户绑定微信时需要再次验证手机号）
+    if not verify_code(phone_number, verification_code, "bind"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
+        )
+
+    # 检查手机号是否已注册
+    phone_email = f"{phone_number}@sms.local"
+    if Users.get_user_by_email(phone_email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已注册"
+        )
+
+    # 检查微信是否已被其他用户绑定
+    wechat_email = f"{openid}@wechat.local"
+    existing_wechat_user = Users.get_user_by_email(wechat_email)
+    if existing_wechat_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该微信账号已被其他用户绑定"
+        )
+
+    try:
+        # 获取微信用户信息
+        user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
+
+        user_count = Users.get_num_users()
+        role = (
+            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
+        )
+
+        # 创建新用户（以手机号为主要账号）
+        hashed = get_password_hash(pending_data["password"])
+        new_user = Auths.insert_new_auth(
+            email=phone_email,
+            password=hashed,
+            name=pending_data["name"],
+            role=role,
+            profile_image_url=user_info.get("headimgurl", ""),
+            login_type="phone",
+            phone_number=phone_number,
+            wechat_openid=openid,
+            wechat_unionid=user_info.get("unionid"),
+            auth_metadata=user_info,
+        )
+
+        if not new_user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="用户创建失败",
+            )
+
+        # 生成JWT令牌
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+        token = create_token(
+            data={"id": new_user.id},
+            expires_delta=expires_delta,
+        )
+
+        datetime_expires_at = (
+            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+            if expires_at
+            else None
+        )
+
+        # 设置Cookie
+        response.set_cookie(
+            key="token",
+            value=token,
+            expires=datetime_expires_at,
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
+
+        # 获取用户权限
+        user_permissions = get_permissions(
+            new_user.id, request.app.state.config.USER_PERMISSIONS
+        )
+
+        # 初始化用户积分
+        credit = Credits.init_credit_by_user_id(new_user.id)
+
+        # 清理临时数据
+        del pending_phone_registrations[phone_number]
+
+        # 清理场景值
+        if scene_id in wechat_follow_states:
+            del wechat_follow_states[scene_id]
+
+        return {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_at": expires_at,
+            "id": new_user.id,
+            "email": new_user.email,
+            "name": new_user.name,
+            "role": new_user.role,
+            "profile_image_url": new_user.profile_image_url,
+            "permissions": user_permissions,
+            "credit": credit.credit,
+        }
+
+    except Exception as e:
+        log.error(f"手机号注册绑定微信失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="绑定失败"
         )
