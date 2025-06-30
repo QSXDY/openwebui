@@ -96,6 +96,12 @@ class UserResponse(BaseModel):
     email: str
     role: str
     profile_image_url: str
+    phone_number: Optional[str] = None
+    wechat_openid: Optional[str] = None
+    wechat_nickname: Optional[str] = None
+    primary_login_type: Optional[str] = "email"
+    available_login_types: Optional[str] = None
+    binding_status: Optional[dict] = None
 
 
 class UserNameResponse(BaseModel):
