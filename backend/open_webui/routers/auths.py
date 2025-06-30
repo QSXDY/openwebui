@@ -1062,6 +1062,10 @@ async def wechat_follow_login(
                 name=nickname,
                 role=role,
                 profile_image_url=profile_image_url,
+                login_type="wechat",
+                external_id=form_data.openid,
+                wechat_nickname=nickname,
+                wechat_openid=form_data.openid,
             )
 
             if not user:

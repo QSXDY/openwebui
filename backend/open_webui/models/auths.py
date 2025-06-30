@@ -215,6 +215,16 @@ class AuthsTable:
                 wechat_nickname=user_wechat_nickname,
             )
 
+            # 确保用户的绑定信息被正确设置
+            if user and (user_phone_number or user_wechat_openid):
+                Users.update_user_binding_info(
+                    user_id=id,
+                    phone_number=user_phone_number,
+                    wechat_openid=user_wechat_openid,
+                    wechat_nickname=user_wechat_nickname,
+                    login_type=login_type,
+                )
+
             db.commit()
             db.refresh(result)
 
@@ -337,21 +347,96 @@ class AuthsTable:
         try:
             with get_db() as db:
                 update_data = {}
+                user_update_params = {}
+
                 if login_type == "phone" and "phone_number" in kwargs:
                     update_data["phone_number"] = kwargs["phone_number"]
+                    user_update_params["phone_number"] = kwargs["phone_number"]
+
                 elif login_type == "wechat":
                     if "wechat_openid" in kwargs:
                         update_data["wechat_openid"] = kwargs["wechat_openid"]
+                        user_update_params["wechat_openid"] = kwargs["wechat_openid"]
                     if "wechat_unionid" in kwargs:
                         update_data["wechat_unionid"] = kwargs["wechat_unionid"]
                     if "auth_metadata" in kwargs:
                         update_data["auth_metadata"] = kwargs["auth_metadata"]
+                        # 从 metadata 中提取微信昵称
+                        if (
+                            isinstance(kwargs["auth_metadata"], dict)
+                            and "nickname" in kwargs["auth_metadata"]
+                        ):
+                            user_update_params["wechat_nickname"] = kwargs[
+                                "auth_metadata"
+                            ]["nickname"]
 
                 if update_data:
+                    # 更新 Auth 表
                     result = db.query(Auth).filter_by(id=user_id).update(update_data)
                     db.commit()
+
+                    # 同步更新 User 表中的绑定信息
+                    if user_update_params:
+                        Users.update_user_binding_info(
+                            user_id=user_id, login_type=login_type, **user_update_params
+                        )
+
                     return result == 1
                 return False
+        except Exception as e:
+            print(f"更新认证绑定信息失败: {str(e)}")
+            return False
+
+    def get_auth_by_phone_number(self, phone_number: str) -> Optional[AuthModel]:
+        """根据手机号获取认证信息"""
+        try:
+            with get_db() as db:
+                auth = (
+                    db.query(Auth)
+                    .filter_by(phone_number=phone_number, active=True)
+                    .first()
+                )
+                if auth:
+                    return AuthModel.model_validate(auth)
+                return None
+        except Exception:
+            return None
+
+    def get_auth_by_wechat_openid(self, wechat_openid: str) -> Optional[AuthModel]:
+        """根据微信openid获取认证信息"""
+        try:
+            with get_db() as db:
+                auth = (
+                    db.query(Auth)
+                    .filter_by(wechat_openid=wechat_openid, active=True)
+                    .first()
+                )
+                if auth:
+                    return AuthModel.model_validate(auth)
+                return None
+        except Exception:
+            return None
+
+    def check_binding_availability(self, login_type: str, login_value: str) -> bool:
+        """检查绑定信息是否可用（未被其他用户使用）"""
+        try:
+            with get_db() as db:
+                if login_type == "phone":
+                    existing = (
+                        db.query(Auth)
+                        .filter_by(phone_number=login_value, active=True)
+                        .first()
+                    )
+                elif login_type == "wechat":
+                    existing = (
+                        db.query(Auth)
+                        .filter_by(wechat_openid=login_value, active=True)
+                        .first()
+                    )
+                else:
+                    return False
+
+                return existing is None
         except Exception:
             return False
 

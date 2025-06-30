@@ -129,6 +129,38 @@ class UserCreditUpdateForm(BaseModel):
     credit: Optional[float] = None
 
 
+class UserBindingForm(BaseModel):
+    """用户绑定表单"""
+
+    login_type: str  # phone, wechat, email
+    login_value: str  # 手机号、微信openid或邮箱
+    verification_code: Optional[str] = None  # 验证码（如果需要）
+    wechat_nickname: Optional[str] = None  # 微信昵称（仅微信绑定时使用）
+
+
+class UserUnbindingForm(BaseModel):
+    """用户解绑表单"""
+
+    login_type: str  # phone, wechat, email
+    verification_code: Optional[str] = None  # 验证码（如果需要）
+
+
+class UserBindingStatusResponse(BaseModel):
+    """用户绑定状态响应"""
+
+    user_id: str
+    primary_login_type: str
+    available_login_types: Optional[str] = None
+    binding_status: dict
+    internal_binding_status: dict
+
+
+class UserSwitchPrimaryLoginForm(BaseModel):
+    """切换主要登录方式表单"""
+
+    new_primary_login_type: str  # email, phone, wechat
+
+
 class UsersTable:
     def insert_new_user(
         self,
@@ -436,6 +468,274 @@ class UsersTable:
                 return UserModel.model_validate(user)
             else:
                 return None
+
+    def update_user_binding_info(
+        self,
+        user_id: str,
+        phone_number: Optional[str] = None,
+        wechat_openid: Optional[str] = None,
+        wechat_nickname: Optional[str] = None,
+        login_type: Optional[str] = None,
+    ) -> Optional[UserModel]:
+        """更新用户绑定信息"""
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(id=user_id).first()
+                if not user:
+                    return None
+
+                update_data = {}
+
+                # 更新手机号绑定
+                if phone_number is not None:
+                    update_data["phone_number"] = phone_number
+                    # 更新可用登录方式
+                    available_types = set((user.available_login_types or "").split(","))
+                    available_types.discard("")  # 移除空字符串
+                    available_types.add("phone")
+                    update_data["available_login_types"] = ",".join(available_types)
+
+                    # 更新绑定状态
+                    binding_status = user.binding_status or {}
+                    binding_status["phone"] = "active"
+                    update_data["binding_status"] = binding_status
+
+                # 更新微信绑定
+                if wechat_openid is not None:
+                    update_data["wechat_openid"] = wechat_openid
+                    if wechat_nickname is not None:
+                        update_data["wechat_nickname"] = wechat_nickname
+
+                    # 更新可用登录方式
+                    available_types = set((user.available_login_types or "").split(","))
+                    available_types.discard("")  # 移除空字符串
+                    available_types.add("wechat")
+                    update_data["available_login_types"] = ",".join(available_types)
+
+                    # 更新绑定状态
+                    binding_status = user.binding_status or {}
+                    binding_status["wechat"] = "active"
+                    update_data["binding_status"] = binding_status
+
+                # 更新主要登录方式
+                if login_type is not None:
+                    update_data["primary_login_type"] = login_type
+
+                # 更新修改时间
+                update_data["updated_at"] = int(time.time())
+
+                # 执行更新
+                if update_data:
+                    db.query(User).filter_by(id=user_id).update(update_data)
+                    db.commit()
+
+                    # 返回更新后的用户信息
+                    updated_user = db.query(User).filter_by(id=user_id).first()
+                    return UserModel.model_validate(updated_user)
+
+                return UserModel.model_validate(user)
+        except Exception as e:
+            print(f"更新用户绑定信息失败: {str(e)}")
+            return None
+
+    def unbind_user_login_method(
+        self, user_id: str, login_type: str
+    ) -> Optional[UserModel]:
+        """解绑用户登录方式"""
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(id=user_id).first()
+                if not user:
+                    return None
+
+                update_data = {}
+
+                # 解绑手机号
+                if login_type == "phone":
+                    update_data["phone_number"] = None
+
+                # 解绑微信
+                elif login_type == "wechat":
+                    update_data["wechat_openid"] = None
+                    update_data["wechat_nickname"] = None
+
+                # 更新可用登录方式
+                available_types = set((user.available_login_types or "").split(","))
+                available_types.discard("")  # 移除空字符串
+                available_types.discard(login_type)  # 移除解绑的登录方式
+                update_data["available_login_types"] = ",".join(available_types)
+
+                # 更新绑定状态
+                binding_status = user.binding_status or {}
+                if login_type in binding_status:
+                    binding_status[login_type] = "inactive"
+                update_data["binding_status"] = binding_status
+
+                # 如果解绑的是主要登录方式，需要切换到其他方式
+                if user.primary_login_type == login_type:
+                    if "email" in available_types:
+                        update_data["primary_login_type"] = "email"
+                    elif available_types:
+                        update_data["primary_login_type"] = list(available_types)[0]
+
+                # 更新修改时间
+                update_data["updated_at"] = int(time.time())
+
+                # 执行更新
+                if update_data:
+                    db.query(User).filter_by(id=user_id).update(update_data)
+                    db.commit()
+
+                    # 返回更新后的用户信息
+                    updated_user = db.query(User).filter_by(id=user_id).first()
+                    return UserModel.model_validate(updated_user)
+
+                return UserModel.model_validate(user)
+        except Exception as e:
+            print(f"解绑用户登录方式失败: {str(e)}")
+            return None
+
+    def get_user_by_phone_number(self, phone_number: str) -> Optional[UserModel]:
+        """根据手机号获取用户信息"""
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(phone_number=phone_number).first()
+                return UserModel.model_validate(user) if user else None
+        except Exception:
+            return None
+
+    def get_user_by_wechat_openid(self, wechat_openid: str) -> Optional[UserModel]:
+        """根据微信openid获取用户信息"""
+        try:
+            with get_db() as db:
+                user = db.query(User).filter_by(wechat_openid=wechat_openid).first()
+                return UserModel.model_validate(user) if user else None
+        except Exception:
+            return None
+
+    def check_user_binding_status(self, user_id: str) -> dict:
+        """检查用户的绑定状态"""
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return {"error": "用户不存在"}
+
+            binding_status = {
+                "email": {
+                    "bound": bool(user.email),
+                    "value": user.email,
+                    "is_primary": user.primary_login_type == "email",
+                },
+                "phone": {
+                    "bound": bool(user.phone_number),
+                    "value": user.phone_number,
+                    "is_primary": user.primary_login_type == "phone",
+                },
+                "wechat": {
+                    "bound": bool(user.wechat_openid),
+                    "value": user.wechat_openid,
+                    "nickname": user.wechat_nickname,
+                    "is_primary": user.primary_login_type == "wechat",
+                },
+            }
+
+            return {
+                "user_id": user_id,
+                "primary_login_type": user.primary_login_type,
+                "available_login_types": user.available_login_types,
+                "binding_status": binding_status,
+                "internal_binding_status": user.binding_status or {},
+            }
+        except Exception as e:
+            return {"error": f"检查绑定状态失败: {str(e)}"}
+
+    def check_binding_conflicts(
+        self, user_id: str, login_type: str, login_value: str
+    ) -> dict:
+        """检查绑定是否冲突（是否已被其他用户使用）"""
+        try:
+            with get_db() as db:
+                if login_type == "phone":
+                    existing_user = (
+                        db.query(User)
+                        .filter(User.phone_number == login_value, User.id != user_id)
+                        .first()
+                    )
+                elif login_type == "wechat":
+                    existing_user = (
+                        db.query(User)
+                        .filter(User.wechat_openid == login_value, User.id != user_id)
+                        .first()
+                    )
+                elif login_type == "email":
+                    existing_user = (
+                        db.query(User)
+                        .filter(User.email == login_value, User.id != user_id)
+                        .first()
+                    )
+                else:
+                    return {"conflict": False, "message": "不支持的登录类型"}
+
+                if existing_user:
+                    return {
+                        "conflict": True,
+                        "message": f"该{login_type}已被其他用户使用",
+                        "existing_user_id": existing_user.id,
+                    }
+                else:
+                    return {"conflict": False, "message": "可以绑定"}
+        except Exception as e:
+            return {"conflict": True, "message": f"检查冲突时出错: {str(e)}"}
+
+    def get_user_available_login_methods(self, user_id: str) -> list:
+        """获取用户可用的登录方式"""
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return []
+
+            methods = []
+            if user.email:
+                methods.append("email")
+            if user.phone_number:
+                methods.append("phone")
+            if user.wechat_openid:
+                methods.append("wechat")
+
+            return methods
+        except Exception:
+            return []
+
+    def switch_primary_login_type(
+        self, user_id: str, new_primary_type: str
+    ) -> Optional[UserModel]:
+        """切换用户的主要登录方式"""
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return None
+
+            # 检查新的主要登录方式是否已绑定
+            if new_primary_type == "email" and not user.email:
+                return None
+            elif new_primary_type == "phone" and not user.phone_number:
+                return None
+            elif new_primary_type == "wechat" and not user.wechat_openid:
+                return None
+            elif new_primary_type not in ["email", "phone", "wechat"]:
+                return None
+
+            # 更新主要登录方式
+            return self.update_user_by_id(
+                user_id,
+                {
+                    "primary_login_type": new_primary_type,
+                    "updated_at": int(time.time()),
+                },
+            )
+        except Exception as e:
+            print(f"切换主要登录方式失败: {str(e)}")
+            return None
 
 
 Users = UsersTable()
