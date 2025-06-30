@@ -776,6 +776,12 @@ async def get_session_user(
         "profile_image_url": user.profile_image_url,
         "permissions": user_permissions,
         "credit": credit.credit,
+        "primary_login_type": user.primary_login_type,
+        "available_login_types": user.available_login_types,
+        "phone_number": user.phone_number,
+        "wechat_openid": user.wechat_openid,
+        "wechat_nickname": user.wechat_nickname,
+        "binding_status": user.binding_status,
     }
 
 
