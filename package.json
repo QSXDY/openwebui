@@ -69,7 +69,7 @@
 		"@tiptap/core": "^2.11.9",
 		"@tiptap/extension-code-block-lowlight": "^2.11.9",
 		"@tiptap/extension-highlight": "^2.10.0",
-		"@tiptap/extension-placeholder": "^2.10.0",
+		"@tiptap/extension-placeholder": "^2.23.1",
 		"@tiptap/extension-typography": "^2.10.0",
 		"@tiptap/pm": "^2.11.7",
 		"@tiptap/starter-kit": "^2.10.0",
