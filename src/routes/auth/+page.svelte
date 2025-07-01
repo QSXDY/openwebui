@@ -17,6 +17,7 @@
 		weChatFollowLogin,
 		checkWeChatFollowStatus,
 		bindPhoneNumber,
+		smsSignin,
 		bindWeChat,
 		registerWithWeChatBinding
 	} from '$lib/apis/auths';
@@ -46,7 +47,7 @@
 	let codetext = '发送验证码';
 	let isCounting = false;
 	let countdown = 60;
-
+	let tokenUser = {};
 	// 微信公众号关注登录相关变量
 	let wechatQRCode = '';
 	let wechatSceneId = '';
@@ -55,7 +56,7 @@
 	let qrCodeExpired = false;
 	let needBindPhone = false; // 是否需要绑定手机号
 	let showBindPhoneModal = false; // 显示绑定手机号弹窗
-	
+
 	// 新增：手机号注册待绑定微信的状态
 	let pendingPhoneRegistration = null; // 存储待绑定微信的手机号注册信息
 	let showWeChatBindingModal = false; // 显示微信绑定弹窗
@@ -67,15 +68,28 @@
 
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
-			console.log(sessionUser);
-
+			if (sessionUser.token) {
+				tokenUser = sessionUser;
+			}
+			console.log('检查是否需要绑定手机号', sessionUser);
 			// 检查是否需要绑定手机号
-			if (sessionUser.need_bind_phone) {
-				needBindPhone = true;
-				showBindPhoneModal = true;
-				toast.info('登录成功，请绑定手机号以完善账户信息');
+
+			if (login !== 'phone') {
+				if (sessionUser.phone_number == null) {
+					needBindPhone = true;
+					showBindPhoneModal = true;
+					return toast.info('登录成功，请绑定手机号以完善账户信息');
+				} else {
+					toast.success($i18n.t(`You're now logged in.`));
+				}
 			} else {
-				toast.success($i18n.t(`You're now logged in.`));
+				if (sessionUser.wechat_openid == null) {
+					showWeChatBindingModal = true;
+					getWeChatQRForBinding();
+				return 	toast.success('手机号验证成功，请扫描微信二维码完成注册');
+				} else {
+					toast.success($i18n.t(`You're now logged in.`));
+				}
 			}
 
 			if (sessionUser.token) {
@@ -113,8 +127,6 @@
 		await setSessionUser(sessionUser);
 	};
 
-
-
 	const ldapSignInHandler = async () => {
 		const sessionUser = await ldapUserSignIn(ldapUsername, password).catch((error) => {
 			toast.error(`${error}`);
@@ -130,8 +142,8 @@
 			if (login === 'email') {
 				await signInHandler();
 			} else {
-				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
-				console.log('手机号登录ldap');
+				// return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
+				await smssignInHandler();
 			}
 		} else {
 			if (login === 'email') {
@@ -140,11 +152,18 @@
 				// 手机号注册流程
 				await phoneRegisterHandler();
 			} else {
-				return toast.error(`目前处于内部测试阶段，暂时无法使用。`,);
+				return toast.error(`目前处于内部测试阶段，暂时无法使用。`);
 			}
 		}
 	};
+	const smssignInHandler = async () => {
+		const sessionUser = await smsSignin(phone, phonecode).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
+		await setSessionUser(sessionUser);
+	};
 	// 新增：手机号注册处理函数
 	const phoneRegisterHandler = async () => {
 		if (!name || !phone || !phonecode || !password) {
@@ -154,7 +173,7 @@
 
 		try {
 			const result = await smsRegister(phone, phonecode, password, name);
-			
+
 			if (result.success && result.require_wechat_binding) {
 				// 需要绑定微信才能完成注册
 				pendingPhoneRegistration = {
@@ -164,7 +183,7 @@
 				};
 				showWeChatBindingModal = true;
 				toast.success('手机号验证成功，请扫描微信二维码完成注册');
-				
+
 				// 获取微信二维码用于绑定
 				await getWeChatQRForBinding();
 			} else {
@@ -319,7 +338,7 @@
 				const response = await checkWeChatFollowStatus(wechatSceneId);
 				if (response && response.status === 'followed' && response.openid) {
 					stopWeChatPolling();
-					
+
 					// 处理微信绑定注册
 					if (pendingPhoneRegistration) {
 						try {
@@ -332,11 +351,11 @@
 								pendingPhoneRegistration.name,
 								pendingPhoneRegistration.password
 							);
-							
+
 							// 清理状态
 							pendingPhoneRegistration = null;
 							showWeChatBindingModal = false;
-							
+
 							await setSessionUser(sessionUser);
 							toast.success('注册成功！手机号和微信已绑定');
 						} catch (bindingError) {
@@ -428,7 +447,7 @@
 
 	// 新增：取消微信绑定
 	const cancelWeChatBinding = () => {
-		stopWeChatPolling();
+		refreshWeChatQR();
 		showWeChatBindingModal = false;
 		pendingPhoneRegistration = null;
 		wechatQRCode = '';
@@ -482,12 +501,10 @@
 		}
 
 		try {
-			const token = localStorage.getItem('token');
-			await bindPhoneNumber(phone, phonecode, token);
+			await bindPhoneNumber(phone, phonecode, tokenUser.token);
 			toast.success('手机号绑定成功！');
 			showBindPhoneModal = false;
 			needBindPhone = false;
-
 			// 绑定成功后跳转
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
@@ -1037,7 +1054,7 @@
 <!-- 绑定手机号弹窗 -->
 {#if showBindPhoneModal}
 	<div class="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50">
-		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 shadow-2xl">
+		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-[90vw] max-w-md mx-4 shadow-2xl">
 			<div class="text-center mb-6">
 				<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">完善账户信息</h2>
 				<p class="text-sm text-gray-600 dark:text-gray-400">为了账户安全，请绑定您的手机号</p>
@@ -1070,6 +1087,7 @@
 					</label>
 					<div class="flex gap-2">
 						<input
+							style="width: 10px;"
 							bind:value={phonecode}
 							type="text"
 							id="bind-code"
@@ -1079,7 +1097,7 @@
 						/>
 						<button
 							on:click={sendCode}
-							class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium text-sm transition disabled:opacity-50"
+							class="px-4 py-2 min-w-[105px] bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium text-sm transition disabled:opacity-50"
 							type="button"
 							disabled={isCounting}
 						>
@@ -1090,12 +1108,12 @@
 			</div>
 
 			<div class="flex gap-3 mt-6">
-				<button
+				<!-- <button
 					on:click={skipBindPhone}
 					class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium text-sm transition hover:bg-gray-50 dark:hover:bg-gray-700"
 				>
 					暂时跳过
-				</button>
+				</button> -->
 				<button
 					on:click={handleBindPhone}
 					class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium text-sm transition"
@@ -1113,12 +1131,16 @@
 		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 shadow-2xl">
 			<div class="text-center mb-6">
 				<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">绑定微信完成注册</h2>
-				<p class="text-sm text-gray-600 dark:text-gray-400">手机号已验证，请扫描下方二维码绑定微信</p>
+				<p class="text-sm text-gray-600 dark:text-gray-400">
+					手机号已验证，请扫描下方二维码绑定微信
+				</p>
 			</div>
 
 			<div class="flex flex-col items-center">
 				{#if wechatQRCode && !qrCodeExpired}
-					<div class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600">
+					<div
+						class="bg-white p-1 rounded-lg shadow-md border-1 border-gray-200 dark:border-gray-600"
+					>
 						<img src={wechatQRCode} alt="微信绑定二维码" class="w-48 h-48" />
 					</div>
 
@@ -1130,10 +1152,10 @@
 					{/if}
 				{:else if qrCodeExpired}
 					<div class="text-center">
-						<div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
-							<div class="text-red-600 dark:text-red-400 text-sm font-medium">
-								⚠️ 二维码已过期
-							</div>
+						<div
+							class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4"
+						>
+							<div class="text-red-600 dark:text-red-400 text-sm font-medium">⚠️ 二维码已过期</div>
 							<div class="text-red-500 dark:text-red-300 text-xs mt-1">
 								请点击下方按钮重新获取二维码
 							</div>
@@ -1147,18 +1169,20 @@
 					</div>
 				{:else}
 					<div class="flex flex-col items-center">
-						<div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 mb-4 w-48 h-48 flex items-center justify-center">
+						<div
+							class="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 mb-4 w-48 h-48 flex items-center justify-center"
+						>
 							<div class="text-center">
 								<Spinner class="w-8 h-8 mx-auto mb-2" />
-								<div class="text-sm text-gray-600 dark:text-gray-400">
-									正在生成二维码...
-								</div>
+								<div class="text-sm text-gray-600 dark:text-gray-400">正在生成二维码...</div>
 							</div>
 						</div>
 					</div>
 				{/if}
 
-				<div class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs leading-relaxed">
+				<div
+					class="mt-4 text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs leading-relaxed"
+				>
 					💡 请使用微信扫描上方二维码关注公众号，关注成功后即可完成注册
 				</div>
 

@@ -979,7 +979,6 @@ export const bindPhoneNumber = async (
 	token: string
 ) => {
 	let error = null;
-
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/bind/phone`, {
 		method: 'POST',
 		headers: {
