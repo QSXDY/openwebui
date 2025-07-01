@@ -93,7 +93,7 @@
 					const updatedUser = await updateUserProfiles(
 						localStorage.token,
 						response.openid,
-						wechatSceneId,
+						wechatSceneId
 					).catch((error) => {
 						toast.error(`${error}`);
 						stopWeChatPolling();

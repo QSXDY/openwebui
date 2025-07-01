@@ -500,7 +500,7 @@ export const updateUserProfiles = async (token: string, openid: string, scene_id
 		},
 		body: JSON.stringify({
 			openid: openid,
-			scene_id: scene_id,
+			scene_id: scene_id
 		})
 	})
 		.then(async (res) => {
@@ -971,7 +971,6 @@ export const checkWeChatFollowStatus = async (scene_id: string) => {
 
 	return res;
 };
-
 // 绑定手机号
 export const bindPhoneNumber = async (
 	phone_number: string,
@@ -1039,9 +1038,9 @@ export const bindWeChat = async (openid: string, scene_id: string, token: string
 
 // 手机号注册绑定微信
 export const registerWithWeChatBinding = async (
-	openid: string, 
-	scene_id: string, 
-	phone_number: string, 
+	openid: string,
+	scene_id: string,
+	phone_number: string,
 	verification_code: string,
 	name: string,
 	password: string

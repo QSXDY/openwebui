@@ -73,7 +73,6 @@
 			}
 			console.log('检查是否需要绑定手机号', sessionUser);
 			// 检查是否需要绑定手机号
-
 			if (login !== 'phone') {
 				if (sessionUser.phone_number == null) {
 					needBindPhone = true;
@@ -86,7 +85,7 @@
 				if (sessionUser.wechat_openid == null) {
 					showWeChatBindingModal = true;
 					getWeChatQRForBinding();
-				return 	toast.success('手机号验证成功，请扫描微信二维码完成注册');
+					return toast.success('手机号验证成功，请扫描微信二维码完成注册');
 				} else {
 					toast.success($i18n.t(`You're now logged in.`));
 				}
