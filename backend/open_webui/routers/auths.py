@@ -1101,12 +1101,14 @@ async def wechat_follow_login(
                     avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
                     profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
 
-            # 更新用户信息
+            # 更新用户信息，确保wechat_openid字段被正确设置
             Users.update_user_by_id(
                 user.id,
                 {
                     "name": nickname,
                     "profile_image_url": profile_image_url,
+                    "wechat_openid": form_data.openid,  # 确保wechat_openid被正确设置
+                    "wechat_nickname": nickname,
                 },
             )
 
@@ -1419,6 +1421,86 @@ async def test_wechat_message(
 
 
 ############################
+# 检查手机号是否已存在接口
+############################
+
+
+class CheckPhoneForm(BaseModel):
+    phone_number: str = Field(..., description="手机号码")
+
+
+@router.post("/check/phone")
+async def check_phone_exists(form_data: CheckPhoneForm):
+    """检查手机号是否已存在"""
+    phone_number = form_data.phone_number.strip()
+
+    # 验证手机号格式
+    if not validate_phone_number(phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
+        )
+
+    # 检查手机号是否已被注册（通过邮箱检查）
+    phone_email = f"{phone_number}@sms.local"
+    phone_user = Users.get_user_by_email(phone_email)
+
+    # 检查手机号是否已被绑定（通过手机号字段检查）
+    bound_user = Users.get_user_by_phone_number(phone_number)
+
+    # 检查认证表中的手机号记录
+    phone_auth = Auths.get_auth_by_phone_number(phone_number)
+
+    result = {
+        "phone_number": phone_number,
+        "exists": False,
+        "details": {
+            "registered_as_primary": False,  # 作为主要登录方式注册
+            "bound_to_other_account": False,  # 绑定到其他账号
+            "user_info": None,
+        },
+    }
+
+    if phone_user:
+        result["exists"] = True
+        result["details"]["registered_as_primary"] = True
+        result["details"]["user_info"] = {
+            "id": phone_user.id,
+            "name": phone_user.name,
+            "email": phone_user.email,
+            "primary_login_type": phone_user.primary_login_type,
+            "wechat_openid": phone_user.wechat_openid,
+            "wechat_nickname": phone_user.wechat_nickname,
+        }
+    elif bound_user:
+        result["exists"] = True
+        result["details"]["bound_to_other_account"] = True
+        result["details"]["user_info"] = {
+            "id": bound_user.id,
+            "name": bound_user.name,
+            "email": bound_user.email,
+            "primary_login_type": bound_user.primary_login_type,
+            "wechat_openid": bound_user.wechat_openid,
+            "wechat_nickname": bound_user.wechat_nickname,
+        }
+    elif phone_auth:
+        # 通过认证表找到的用户
+        auth_user = Users.get_user_by_id(phone_auth.id)
+        if auth_user:
+            result["exists"] = True
+            result["details"]["bound_to_other_account"] = True
+            result["details"]["user_info"] = {
+                "id": auth_user.id,
+                "name": auth_user.name,
+                "email": auth_user.email,
+                "primary_login_type": auth_user.primary_login_type,
+                "wechat_openid": auth_user.wechat_openid,
+                "wechat_nickname": auth_user.wechat_nickname,
+            }
+
+    return result
+
+
+############################
 # 绑定手机号接口
 ############################
 
@@ -1709,9 +1791,90 @@ async def register_with_wechat_binding(
     wechat_email = f"{openid}@wechat.local"
     existing_wechat_user = Users.get_user_by_email(wechat_email)
     if existing_wechat_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="该微信账号已被其他用户绑定"
-        )
+        # 如果微信账号未绑定手机号，则直接绑定手机号到该微信账号
+        if existing_wechat_user.phone_number is None:
+            # 更新微信账号绑定手机号
+            Auths.update_auth_binding_info(
+                existing_wechat_user.id,
+                "phone",
+                phone_number=phone_number,
+            )
+
+            # 同步更新用户表
+            Users.update_user_binding_info(
+                user_id=existing_wechat_user.id,
+                phone_number=phone_number,
+                login_type="phone",
+            )
+
+            # 生成JWT令牌返回登录成功
+            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+            expires_at = None
+            if expires_delta:
+                expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+            token = create_token(
+                data={"id": existing_wechat_user.id},
+                expires_delta=expires_delta,
+            )
+
+            datetime_expires_at = (
+                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+                if expires_at
+                else None
+            )
+
+            # 设置Cookie
+            response.set_cookie(
+                key="token",
+                value=token,
+                expires=datetime_expires_at,
+                httponly=True,
+                samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+                secure=WEBUI_AUTH_COOKIE_SECURE,
+            )
+
+            # 获取用户权限
+            user_permissions = get_permissions(
+                existing_wechat_user.id, request.app.state.config.USER_PERMISSIONS
+            )
+
+            # 初始化用户积分
+            credit = Credits.init_credit_by_user_id(existing_wechat_user.id)
+
+            # 清理临时数据
+            del pending_phone_registrations[phone_number]
+
+            # 清理场景值
+            if scene_id in wechat_follow_states:
+                del wechat_follow_states[scene_id]
+
+            # 重新获取更新后的用户信息
+            updated_user = Users.get_user_by_id(existing_wechat_user.id)
+
+            return {
+                "token": token,
+                "token_type": "Bearer",
+                "expires_at": expires_at,
+                "id": updated_user.id,
+                "email": updated_user.email,
+                "name": updated_user.name,
+                "role": updated_user.role,
+                "profile_image_url": updated_user.profile_image_url,
+                "permissions": user_permissions,
+                "credit": credit.credit,
+                "phone_number": updated_user.phone_number,
+                "wechat_openid": updated_user.wechat_openid,
+                "wechat_nickname": updated_user.wechat_nickname,
+                "primary_login_type": updated_user.primary_login_type,
+                "available_login_types": updated_user.available_login_types,
+                "binding_status": updated_user.binding_status,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该微信账号已绑定其他手机号",
+            )
 
     try:
         # 获取微信用户信息
@@ -1722,20 +1885,47 @@ async def register_with_wechat_binding(
             "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
         )
 
-        # 创建新用户（以手机号为主要账号）
+        # 创建新用户（以手机号为主要账号，同时绑定微信）
         hashed = get_password_hash(pending_data["password"])
+
+        # 合并微信信息到用户名和头像
+        user_name = pending_data["name"]
+        user_profile_image = user_info.get("headimgurl", "")
+        if not user_profile_image:
+            # 如果微信没有头像，使用默认头像生成逻辑
+            import hashlib
+
+            avatar_hash = hashlib.md5(openid.encode()).hexdigest()
+            user_profile_image = (
+                f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
+            )
+
         new_user = Auths.insert_new_auth(
             email=phone_email,
             password=hashed,
-            name=pending_data["name"],
+            name=user_name,
             role=role,
-            profile_image_url=user_info.get("headimgurl", ""),
-            login_type="phone",
+            profile_image_url=user_profile_image,
+            login_type="phone",  # 主要登录方式为手机号
             phone_number=phone_number,
-            wechat_openid=openid,
+            wechat_openid=openid,  # 同时绑定微信openid
             wechat_unionid=user_info.get("unionid"),
             auth_metadata=user_info,
         )
+
+        # 确保用户表中也正确设置了微信信息，并更新可用登录方式
+        if new_user:
+            # 更新用户绑定信息，同时设置可用登录方式包含手机号和微信
+            Users.update_user_by_id(
+                new_user.id,
+                {
+                    "available_login_types": "phone,wechat",  # 同时支持手机号和微信登录
+                    "wechat_openid": openid,
+                    "wechat_nickname": user_info.get("nickname"),
+                    "binding_status": {"phone": "active", "wechat": "active"},
+                    "updated_at": int(time.time()),
+                },
+            )
 
         if not new_user:
             raise HTTPException(
