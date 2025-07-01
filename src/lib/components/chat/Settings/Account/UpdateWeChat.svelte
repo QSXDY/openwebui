@@ -140,12 +140,18 @@
 		<button
 			class=" text-xs font-medium text-gray-500"
 			type="button"
-			on:click={() => {
-				show = !show;
-			}}>{show ? '收起' : '绑定'}</button
+			>{$user.wechat_openid == null ? '未绑定' : '已绑定'}</button
 		>
 	</div>
-
+		<hr class="border-gray-50 dark:border-gray-850 my-2" />
+<div class="flex justify-between items-center text-sm">
+		<div class="  font-medium">手机号绑定</div>
+		<button
+			class=" text-xs font-medium text-gray-500"
+			type="button"
+			>{$user.phone_number == null ? '未绑定' : $user.phone_number}</button
+		>
+	</div>
 	{#if show}
 		<div class="flex flex-col mt-4 items-center">
 			{#if wechatQRCode && !qrCodeExpired}

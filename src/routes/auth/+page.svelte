@@ -73,7 +73,7 @@
 			}
 			console.log('检查是否需要绑定手机号', sessionUser);
 			// 检查是否需要绑定手机号
-			if (login !== 'phone') {
+			if (login === 'wechat') {
 				if (sessionUser.phone_number == null) {
 					needBindPhone = true;
 					showBindPhoneModal = true;
@@ -81,7 +81,7 @@
 				} else {
 					toast.success($i18n.t(`You're now logged in.`));
 				}
-			} else {
+			} else if (login === 'phone') {
 				if (sessionUser.wechat_openid == null) {
 					showWeChatBindingModal = true;
 					getWeChatQRForBinding();
