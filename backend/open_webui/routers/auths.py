@@ -190,10 +190,38 @@ class SMSService:
     def create_client(request: Request) -> Optional[DysmsapiClient]:
         """创建短信服务客户端"""
         if not SMS_AVAILABLE:
+            log.error("短信SDK不可用：阿里云短信SDK未安装")
             return None
 
         try:
             sms_config = SMSConfig(request)
+
+            # 添加配置参数检查和日志
+            log.info(f"短信配置检查:")
+            log.info(
+                f"  ACCESS_KEY_ID: {'已配置' if sms_config.ACCESS_KEY_ID else '未配置'}"
+            )
+            log.info(
+                f"  ACCESS_KEY_SECRET: {'已配置' if sms_config.ACCESS_KEY_SECRET else '未配置'}"
+            )
+            log.info(f"  SIGN_NAME: {sms_config.SIGN_NAME}")
+            log.info(f"  TEMPLATE_CODE: {sms_config.TEMPLATE_CODE}")
+            log.info(f"  ENDPOINT: {sms_config.ENDPOINT}")
+
+            # 检查必要的配置参数
+            if not sms_config.ACCESS_KEY_ID:
+                log.error("短信配置错误：ACCESS_KEY_ID未配置")
+                return None
+            if not sms_config.ACCESS_KEY_SECRET:
+                log.error("短信配置错误：ACCESS_KEY_SECRET未配置")
+                return None
+            if not sms_config.SIGN_NAME:
+                log.error("短信配置错误：SIGN_NAME未配置")
+                return None
+            if not sms_config.TEMPLATE_CODE:
+                log.error("短信配置错误：TEMPLATE_CODE未配置")
+                return None
+
             config = open_api_models.Config(
                 access_key_id=sms_config.ACCESS_KEY_ID,
                 access_key_secret=sms_config.ACCESS_KEY_SECRET,
@@ -201,46 +229,98 @@ class SMSService:
             )
             config.connect_timeout = 5000
             config.read_timeout = 10000
-            return DysmsapiClient(config)
+
+            client = DysmsapiClient(config)
+            log.info("短信客户端创建成功")
+            return client
         except Exception as e:
             log.error(f"创建短信客户端失败: {str(e)}")
+            import traceback
+
+            log.error(f"详细错误信息: {traceback.format_exc()}")
             return None
 
     @staticmethod
     def send_verification_sms(request: Request, phone_number: str, code: str) -> bool:
         """发送验证码短信"""
         if not SMS_AVAILABLE:
-            log.error("短信SDK不可用")
+            log.error("短信SDK不可用：阿里云短信SDK未安装")
             return False
 
         try:
+            log.info(f"开始发送短信验证码到手机号: {phone_number}")
+
             client = SMSService.create_client(request)
             if not client:
+                log.error("短信客户端创建失败")
                 return False
 
             sms_config = SMSConfig(request)
-            request = dysmsapi_models.SendSmsRequest(
+
+            # 创建短信发送请求
+            sms_request = dysmsapi_models.SendSmsRequest(
                 phone_numbers=phone_number,
                 sign_name=sms_config.SIGN_NAME,
                 template_code=sms_config.TEMPLATE_CODE,
                 template_param=json.dumps({"code": code}),
             )
 
+            log.info(f"短信请求参数:")
+            log.info(f"  phone_numbers: {phone_number}")
+            log.info(f"  sign_name: {sms_config.SIGN_NAME}")
+            log.info(f"  template_code: {sms_config.TEMPLATE_CODE}")
+            log.info(f"  template_param: {json.dumps({'code': code})}")
+
             runtime = util_models.RuntimeOptions()
             runtime.autoretry = True
             runtime.max_attempts = 3
 
-            response = client.send_sms_with_options(request, runtime)
+            # 发送短信
+            response = client.send_sms_with_options(sms_request, runtime)
+
+            log.info(f"阿里云短信API响应:")
+            log.info(f"  code: {response.body.code}")
+            log.info(f"  message: {response.body.message}")
+            log.info(f"  request_id: {response.body.request_id}")
+            if hasattr(response.body, "biz_id"):
+                log.info(f"  biz_id: {response.body.biz_id}")
 
             if response.body.code == "OK":
                 log.info(f"短信发送成功，手机号: {phone_number}")
                 return True
             else:
-                log.error(f"短信发送失败: {response.body.message}")
+                log.error(
+                    f"短信发送失败 - 错误码: {response.body.code}, 错误信息: {response.body.message}"
+                )
+
+                # 常见错误码解释
+                error_codes = {
+                    "isv.SMS_SIGNATURE_ILLEGAL": "短信签名不合法或未审核通过",
+                    "isv.SMS_TEMPLATE_ILLEGAL": "短信模板不合法或未审核通过",
+                    "isv.ACCOUNT_NOT_EXISTS": "账户不存在",
+                    "isv.ACCOUNT_ABNORMAL": "账户异常",
+                    "isv.SMS_CONTENT_ILLEGAL": "短信内容包含禁止发送内容",
+                    "isv.SMS_SIGN_ILLEGAL": "短信签名不合法",
+                    "isv.INVALID_PARAMETERS": "参数异常",
+                    "isp.RAM_PERMISSION_DENY": "RAM权限DENY",
+                    "isv.AMOUNT_NOT_ENOUGH": "账户余额不足",
+                    "isv.TEMPLATE_MISSING_PARAMETERS": "模板缺少变量",
+                    "isv.BUSINESS_LIMIT_CONTROL": "业务限流",
+                    "isv.INVALID_JSON_PARAM": "JSON参数不合法",
+                    "isv.MOBILE_NUMBER_ILLEGAL": "手机号码格式错误或为空",
+                    "isv.MOBILE_COUNT_OVER_LIMIT": "手机号码数量超过限制",
+                }
+
+                error_explanation = error_codes.get(response.body.code, "未知错误")
+                log.error(f"错误解释: {error_explanation}")
+
                 return False
 
         except Exception as e:
             log.error(f"发送短信异常: {str(e)}")
+            import traceback
+
+            log.error(f"异常详情: {traceback.format_exc()}")
             return False
 
 
@@ -807,13 +887,39 @@ async def send_sms_verification(request: Request, form_data: SendSMSForm):
             status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
         )
 
-    # 如果是登录验证码，检查手机号是否已注册
-    if form_data.type == "login":
-        email = f"{phone_number}@sms.local"
-        user = Users.get_user_by_email(email)
-        if not user:
+    # 检查验证码类型的具体逻辑
+    if form_data.type == "register":
+        # 注册验证码：检查手机号是否已有账号
+        phone_email = f"{phone_number}@sms.local"
+        phone_user = Users.get_user_by_email(phone_email)
+        bound_user = Users.get_user_by_phone_number(phone_number)
+        phone_auth = Auths.get_auth_by_phone_number(phone_number)
+
+        if phone_user or bound_user or phone_auth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号已有关联账号，请使用登录功能",
+            )
+
+    elif form_data.type == "login":
+        # 登录验证码：检查手机号是否已注册
+        phone_user = Users.get_user_by_phone_number(phone_number)
+        if not phone_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号尚未注册"
+            )
+
+    elif form_data.type == "bind":
+        # 绑定验证码：检查手机号是否已被其他用户绑定
+        phone_email = f"{phone_number}@sms.local"
+        phone_user = Users.get_user_by_email(phone_email)
+        bound_user = Users.get_user_by_phone_number(phone_number)
+        phone_auth = Auths.get_auth_by_phone_number(phone_number)
+
+        if phone_user or bound_user or phone_auth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号已被其他用户绑定",
             )
 
     # 检查是否频繁发送（1分钟内只能发送一次）
@@ -861,11 +967,16 @@ async def sms_register(
             status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
         )
 
-    # 检查手机号是否已注册
-    email = f"{phone_number}@sms.local"
-    if Users.get_user_by_email(email):
+    # 再次检查手机号是否已有账号（防止并发问题）
+    phone_email = f"{phone_number}@sms.local"
+    phone_user = Users.get_user_by_email(phone_email)
+    bound_user = Users.get_user_by_phone_number(phone_number)
+    phone_auth = Auths.get_auth_by_phone_number(phone_number)
+
+    if phone_user or bound_user or phone_auth:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已注册"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该手机号已有关联账号，请使用登录功能",
         )
 
     # 将已验证的手机号信息存储到临时字典中，等待微信绑定
@@ -913,8 +1024,7 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
         )
 
     # 查找用户
-    email = f"{phone_number}@sms.local"
-    user = Users.get_user_by_email(email)
+    user = Users.get_user_by_phone_number(phone_number)
 
     if not user:
         raise HTTPException(
@@ -1022,11 +1132,34 @@ async def wechat_follow_login(
         # 使用openid作为唯一标识
         email = f"{form_data.openid}@wechat.local"
 
-        # 查找或创建用户
+        # 查找用户
         user = Users.get_user_by_email(email)
 
-        if not user:
-            # 创建新用户
+        if user:
+            # 用户已存在，检查是否绑定手机号
+            has_phone = bool(user.phone_number)
+
+            if not has_phone:
+                # 未绑定手机号，返回要求绑定手机号的响应
+                return {
+                    "success": False,
+                    "need_phone_binding": True,
+                    "openid": form_data.openid,
+                    "scene_id": form_data.scene_id,
+                    "user_info": {
+                        "id": user.id,
+                        "name": user.name,
+                        "profile_image_url": user.profile_image_url,
+                        "wechat_nickname": user.wechat_nickname
+                        or user_info.get("nickname", ""),
+                    },
+                    "message": "请先绑定手机号完成账号设置",
+                }
+
+            # 已绑定手机号，直接登录
+            log.info(f"微信用户已绑定手机号，直接登录: {user.email}")
+        else:
+            # 用户不存在，创建新用户
             user_count = Users.get_num_users()
             role = (
                 "admin"
@@ -1035,7 +1168,6 @@ async def wechat_follow_login(
             )
 
             # 使用微信昵称作为用户名，如果为空则使用默认名称
-            # 微信公众号API中头像字段是 headimgurl，昵称是 nickname
             nickname = user_info.get("nickname", "")
             if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
                 nickname = f"微信用户_{form_data.openid[-8:]}"
@@ -1044,7 +1176,6 @@ async def wechat_follow_login(
 
             # 如果没有头像，使用默认头像生成逻辑
             if not profile_image_url:
-                # 生成基于openid的默认头像URL（这里可以集成gravatar或其他头像服务）
                 import hashlib
 
                 avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
@@ -1066,6 +1197,7 @@ async def wechat_follow_login(
                 external_id=form_data.openid,
                 wechat_nickname=nickname,
                 wechat_openid=form_data.openid,
+                auth_metadata=user_info,
             )
 
             if not user:
@@ -1073,55 +1205,39 @@ async def wechat_follow_login(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="创建用户失败",
                 )
-        else:
-            # 如果用户已存在，更新用户的头像和昵称
-            log.info(f"用户已存在，更新头像和昵称: {user.email}")
 
-            # 处理昵称
-            nickname = user_info.get("nickname", "")
-            if not nickname or nickname == f"微信用户_{form_data.openid[-8:]}":
-                # 如果微信昵称为空或是默认生成的，保持原有昵称或生成新的
-                if user.name and not user.name.startswith("微信用户_"):
-                    nickname = user.name  # 保持原有昵称
-                else:
-                    nickname = f"微信用户_{form_data.openid[-8:]}"
+            # 新创建的用户需要绑定手机号
+            return {
+                "success": False,
+                "need_phone_binding": True,
+                "openid": form_data.openid,
+                "scene_id": form_data.scene_id,
+                "user_info": {
+                    "id": user.id,
+                    "name": user.name,
+                    "profile_image_url": user.profile_image_url,
+                    "wechat_nickname": user.wechat_nickname or nickname,
+                },
+                "message": "账号创建成功，请绑定手机号完成注册",
+            }
 
-            # 处理头像
+        # 到这里说明用户存在且已绑定手机号，进行登录流程
+        # 更新用户的头像和昵称
+        nickname = user_info.get("nickname", "")
+        if nickname and nickname != f"微信用户_{form_data.openid[-8:]}":
             profile_image_url = user_info.get("headimgurl", "")
-            if not profile_image_url:
-                # 如果微信头像为空，检查用户是否已有头像
-                if user.profile_image_url and not user.profile_image_url.startswith(
-                    "https://www.gravatar.com/avatar/"
-                ):
-                    profile_image_url = user.profile_image_url  # 保持原有头像
-                else:
-                    # 生成默认头像
-                    import hashlib
+            if not profile_image_url and user.profile_image_url:
+                profile_image_url = user.profile_image_url
 
-                    avatar_hash = hashlib.md5(form_data.openid.encode()).hexdigest()
-                    profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
-
-            # 更新用户信息，确保wechat_openid字段被正确设置
             Users.update_user_by_id(
                 user.id,
                 {
-                    "name": nickname,
-                    "profile_image_url": profile_image_url,
-                    "wechat_openid": form_data.openid,  # 确保wechat_openid被正确设置
                     "wechat_nickname": nickname,
+                    "profile_image_url": profile_image_url or user.profile_image_url,
                 },
             )
-
             # 重新获取更新后的用户信息
             user = Users.get_user_by_id(user.id)
-            log.info(
-                f"用户信息已更新: name={user.name}, profile_image_url={user.profile_image_url}"
-            )
-
-        # 检查是否绑定了手机号
-        has_phone = False
-        if "@sms.local" in user.email:
-            has_phone = True
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
@@ -1162,8 +1278,8 @@ async def wechat_follow_login(
         if form_data.scene_id in wechat_follow_states:
             del wechat_follow_states[form_data.scene_id]
 
-        # 返回结果，包含是否需要绑定手机号的提示
-        result = {
+        return {
+            "success": True,
             "token": token,
             "token_type": "Bearer",
             "expires_at": expires_at,
@@ -1174,10 +1290,13 @@ async def wechat_follow_login(
             "profile_image_url": user.profile_image_url,
             "permissions": user_permissions,
             "credit": credit.credit,
-            "need_bind_phone": not has_phone,  # 是否需要绑定手机号
+            "phone_number": user.phone_number,
+            "wechat_openid": user.wechat_openid,
+            "wechat_nickname": user.wechat_nickname,
+            "primary_login_type": user.primary_login_type,
+            "available_login_types": user.available_login_types,
+            "binding_status": user.binding_status,
         }
-
-        return result
 
     except HTTPException:
         raise
@@ -1774,164 +1893,112 @@ async def register_with_wechat_binding(
 
     pending_data = pending_phone_registrations[phone_number]
 
-    # 验证验证码（为手机注册用户绑定微信时需要再次验证手机号）
-    # if not verify_code(phone_number, verification_code, "bind"):
-    #     raise HTTPException(
-    #         status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
-    #     )
-
-    # 检查手机号是否已注册
-    phone_email = f"{phone_number}@sms.local"
-    if Users.get_user_by_email(phone_email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已注册"
-        )
-
-    # 检查微信是否已被其他用户绑定
-    wechat_email = f"{openid}@wechat.local"
-    existing_wechat_user = Users.get_user_by_email(wechat_email)
-    if existing_wechat_user:
-        # 如果微信账号未绑定手机号，则直接绑定手机号到该微信账号
-        if existing_wechat_user.phone_number is None:
-            # 更新微信账号绑定手机号
-            Auths.update_auth_binding_info(
-                existing_wechat_user.id,
-                "phone",
-                phone_number=phone_number,
-            )
-
-            # 同步更新用户表
-            Users.update_user_binding_info(
-                user_id=existing_wechat_user.id,
-                phone_number=phone_number,
-                login_type="phone",
-            )
-
-            # 生成JWT令牌返回登录成功
-            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-            expires_at = None
-            if expires_delta:
-                expires_at = int(time.time()) + int(expires_delta.total_seconds())
-
-            token = create_token(
-                data={"id": existing_wechat_user.id},
-                expires_delta=expires_delta,
-            )
-
-            datetime_expires_at = (
-                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-                if expires_at
-                else None
-            )
-
-            # 设置Cookie
-            response.set_cookie(
-                key="token",
-                value=token,
-                expires=datetime_expires_at,
-                httponly=True,
-                samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-                secure=WEBUI_AUTH_COOKIE_SECURE,
-            )
-
-            # 获取用户权限
-            user_permissions = get_permissions(
-                existing_wechat_user.id, request.app.state.config.USER_PERMISSIONS
-            )
-
-            # 初始化用户积分
-            credit = Credits.init_credit_by_user_id(existing_wechat_user.id)
-
-            # 清理临时数据
-            del pending_phone_registrations[phone_number]
-
-            # 清理场景值
-            if scene_id in wechat_follow_states:
-                del wechat_follow_states[scene_id]
-
-            # 重新获取更新后的用户信息
-            updated_user = Users.get_user_by_id(existing_wechat_user.id)
-
-            return {
-                "token": token,
-                "token_type": "Bearer",
-                "expires_at": expires_at,
-                "id": updated_user.id,
-                "email": updated_user.email,
-                "name": updated_user.name,
-                "role": updated_user.role,
-                "profile_image_url": updated_user.profile_image_url,
-                "permissions": user_permissions,
-                "credit": credit.credit,
-                "phone_number": updated_user.phone_number,
-                "wechat_openid": updated_user.wechat_openid,
-                "wechat_nickname": updated_user.wechat_nickname,
-                "primary_login_type": updated_user.primary_login_type,
-                "available_login_types": updated_user.available_login_types,
-                "binding_status": updated_user.binding_status,
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该微信账号已绑定其他手机号",
-            )
+    # 获取微信用户信息
+    user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
 
     try:
-        # 获取微信用户信息
-        user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
-
-        user_count = Users.get_num_users()
-        role = (
-            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-        )
-
-        # 创建新用户（以手机号为主要账号，同时绑定微信）
-        hashed = get_password_hash(pending_data["password"])
-
-        # 合并微信信息到用户名和头像
-        user_name = pending_data["name"]
-        user_profile_image = user_info.get("headimgurl", "")
-        if not user_profile_image:
-            # 如果微信没有头像，使用默认头像生成逻辑
-            import hashlib
-
-            avatar_hash = hashlib.md5(openid.encode()).hexdigest()
-            user_profile_image = (
-                f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
-            )
-
-        new_user = Auths.insert_new_auth(
-            email=phone_email,
-            password=hashed,
-            name=user_name,
-            role=role,
-            profile_image_url=user_profile_image,
-            login_type="phone",  # 主要登录方式为手机号
+        # 检查并处理账号合并
+        merge_result = Auths.check_and_merge_wechat_phone_binding(
             phone_number=phone_number,
-            wechat_openid=openid,  # 同时绑定微信openid
-            wechat_unionid=user_info.get("unionid"),
+            wechat_openid=openid,
+            wechat_nickname=user_info.get("nickname"),
             auth_metadata=user_info,
         )
 
-        # 确保用户表中也正确设置了微信信息，并更新可用登录方式
-        if new_user:
-            # 更新用户绑定信息，同时设置可用登录方式包含手机号和微信
+        final_user = None
+
+        if merge_result["action"] == "create_new":
+            # 创建新账号（同时绑定手机号和微信）
+            user_count = Users.get_num_users()
+            role = (
+                "admin"
+                if user_count == 0
+                else request.app.state.config.DEFAULT_USER_ROLE
+            )
+
+            # 合并微信信息到用户名和头像
+            user_name = pending_data["name"]
+            user_profile_image = user_info.get("headimgurl", "")
+            if not user_profile_image:
+                import hashlib
+
+                avatar_hash = hashlib.md5(openid.encode()).hexdigest()
+                user_profile_image = (
+                    f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
+                )
+
+            hashed = get_password_hash(pending_data["password"])
+
+            # 使用手机号邮箱作为主邮箱，同时绑定微信信息
+            phone_email = f"{phone_number}@sms.local"
+
+            final_user = Auths.insert_new_auth(
+                email=phone_email,
+                password=hashed,
+                name=user_name,
+                role=role,
+                profile_image_url=user_profile_image,
+                login_type="phone",  # 主要登录方式为手机号
+                phone_number=phone_number,
+                wechat_openid=openid,
+                wechat_unionid=user_info.get("unionid"),
+                auth_metadata=user_info,
+            )
+
+            if not final_user:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="用户创建失败",
+                )
+
+            # 更新用户绑定信息
             Users.update_user_by_id(
-                new_user.id,
+                final_user.id,
                 {
-                    "available_login_types": "phone,wechat",  # 同时支持手机号和微信登录
-                    "wechat_openid": openid,
+                    "available_login_types": "phone,wechat",
                     "wechat_nickname": user_info.get("nickname"),
                     "binding_status": {"phone": "active", "wechat": "active"},
-                    "updated_at": int(time.time()),
                 },
             )
 
-        if not new_user:
+        elif merge_result["action"] in [
+            "merge_to_wechat",
+            "merge_to_phone",
+            "same_account",
+        ]:
+            # 账号合并成功或已是同一账号
+            final_user = merge_result["user"]
+
+            # 如果是合并到微信账号，需要设置密码（如果微信账号没有密码）
+            if merge_result["action"] == "merge_to_wechat":
+                hashed = get_password_hash(pending_data["password"])
+                Auths.update_user_password_by_id(final_user.id, hashed)
+
+                # 更新用户名（如果需要）
+                Users.update_user_by_id(
+                    final_user.id,
+                    {
+                        "name": pending_data["name"],
+                        "available_login_types": "phone,wechat",
+                        "binding_status": {"phone": "active", "wechat": "active"},
+                    },
+                )
+
+        else:
+            # 冲突或错误
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=merge_result["message"],
+            )
+
+        if not final_user:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="用户创建失败",
+                detail="账号处理失败",
             )
+
+        # 重新获取更新后的用户信息
+        final_user = Users.get_user_by_id(final_user.id)
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
@@ -1940,7 +2007,7 @@ async def register_with_wechat_binding(
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
 
         token = create_token(
-            data={"id": new_user.id},
+            data={"id": final_user.id},
             expires_delta=expires_delta,
         )
 
@@ -1962,11 +2029,11 @@ async def register_with_wechat_binding(
 
         # 获取用户权限
         user_permissions = get_permissions(
-            new_user.id, request.app.state.config.USER_PERMISSIONS
+            final_user.id, request.app.state.config.USER_PERMISSIONS
         )
 
         # 初始化用户积分
-        credit = Credits.init_credit_by_user_id(new_user.id)
+        credit = Credits.init_credit_by_user_id(final_user.id)
 
         # 清理临时数据
         del pending_phone_registrations[phone_number]
@@ -1979,19 +2046,28 @@ async def register_with_wechat_binding(
             "token": token,
             "token_type": "Bearer",
             "expires_at": expires_at,
-            "id": new_user.id,
-            "email": new_user.email,
-            "name": new_user.name,
-            "role": new_user.role,
-            "profile_image_url": new_user.profile_image_url,
+            "id": final_user.id,
+            "email": final_user.email,
+            "name": final_user.name,
+            "role": final_user.role,
+            "profile_image_url": final_user.profile_image_url,
             "permissions": user_permissions,
             "credit": credit.credit,
+            "phone_number": final_user.phone_number,
+            "wechat_openid": final_user.wechat_openid,
+            "wechat_nickname": final_user.wechat_nickname,
+            "primary_login_type": final_user.primary_login_type,
+            "available_login_types": final_user.available_login_types,
+            "binding_status": final_user.binding_status,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"手机号注册绑定微信失败: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="绑定失败"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"注册失败: {str(e)}",
         )
 
 
@@ -2990,3 +3066,368 @@ async def get_api_key(user=Depends(get_current_user)):
         }
     else:
         raise HTTPException(404, detail=ERROR_MESSAGES.API_KEY_NOT_FOUND)
+
+
+############################
+# Debug SMS Configuration
+############################
+
+
+@router.get("/sms/debug/config")
+async def debug_sms_config(request: Request, user=Depends(get_admin_user)):
+    """调试短信配置信息（仅管理员）"""
+    try:
+        sms_config = SMSConfig(request)
+
+        config_status = {
+            "SMS_AVAILABLE": SMS_AVAILABLE,
+            "configuration": {
+                "ACCESS_KEY_ID": {
+                    "configured": bool(sms_config.ACCESS_KEY_ID),
+                    "value": (
+                        f"{sms_config.ACCESS_KEY_ID[:8]}***"
+                        if sms_config.ACCESS_KEY_ID
+                        else ""
+                    ),
+                    "length": (
+                        len(sms_config.ACCESS_KEY_ID) if sms_config.ACCESS_KEY_ID else 0
+                    ),
+                },
+                "ACCESS_KEY_SECRET": {
+                    "configured": bool(sms_config.ACCESS_KEY_SECRET),
+                    "value": (
+                        f"{sms_config.ACCESS_KEY_SECRET[:8]}***"
+                        if sms_config.ACCESS_KEY_SECRET
+                        else ""
+                    ),
+                    "length": (
+                        len(sms_config.ACCESS_KEY_SECRET)
+                        if sms_config.ACCESS_KEY_SECRET
+                        else 0
+                    ),
+                },
+                "SIGN_NAME": {
+                    "configured": bool(sms_config.SIGN_NAME),
+                    "value": sms_config.SIGN_NAME,
+                },
+                "TEMPLATE_CODE": {
+                    "configured": bool(sms_config.TEMPLATE_CODE),
+                    "value": sms_config.TEMPLATE_CODE,
+                },
+                "ENDPOINT": {
+                    "configured": bool(sms_config.ENDPOINT),
+                    "value": sms_config.ENDPOINT,
+                },
+            },
+            "client_status": None,
+            "errors": [],
+        }
+
+        # 检查配置完整性
+        missing_configs = []
+        if not sms_config.ACCESS_KEY_ID:
+            missing_configs.append("ACCESS_KEY_ID")
+        if not sms_config.ACCESS_KEY_SECRET:
+            missing_configs.append("ACCESS_KEY_SECRET")
+        if not sms_config.SIGN_NAME:
+            missing_configs.append("SIGN_NAME")
+        if not sms_config.TEMPLATE_CODE:
+            missing_configs.append("TEMPLATE_CODE")
+
+        if missing_configs:
+            config_status["errors"].append(
+                f"缺少必要配置: {', '.join(missing_configs)}"
+            )
+
+        # 尝试创建客户端
+        try:
+            client = SMSService.create_client(request)
+            if client:
+                config_status["client_status"] = "创建成功"
+            else:
+                config_status["client_status"] = "创建失败"
+                config_status["errors"].append("短信客户端创建失败")
+        except Exception as e:
+            config_status["client_status"] = f"创建异常: {str(e)}"
+            config_status["errors"].append(f"客户端异常: {str(e)}")
+
+        # 检查SDK是否安装
+        if not SMS_AVAILABLE:
+            config_status["errors"].append(
+                "阿里云短信SDK未安装，请运行: pip install alibabacloud_dysmsapi20170525"
+            )
+
+        return {
+            "status": "success" if not config_status["errors"] else "error",
+            "data": config_status,
+        }
+    except Exception as e:
+        log.error(f"调试短信配置失败: {str(e)}")
+        return {"status": "error", "message": str(e), "data": None}
+
+
+@router.post("/sms/debug/test")
+async def test_sms_send(request: Request, user=Depends(get_admin_user)):
+    """测试短信发送功能（仅管理员，发送到固定测试号码）"""
+    try:
+        # 使用一个虚拟的测试手机号进行配置测试（不会真正发送）
+        test_phone = "13800138000"
+        test_code = "123456"
+
+        log.info("=== 开始短信发送测试 ===")
+
+        # 检查SDK可用性
+        if not SMS_AVAILABLE:
+            return {
+                "status": "error",
+                "message": "阿里云短信SDK未安装",
+                "details": "请运行: pip install alibabacloud_dysmsapi20170525",
+            }
+
+        # 检查配置
+        sms_config = SMSConfig(request)
+        config_errors = []
+
+        if not sms_config.ACCESS_KEY_ID:
+            config_errors.append("ACCESS_KEY_ID未配置")
+        if not sms_config.ACCESS_KEY_SECRET:
+            config_errors.append("ACCESS_KEY_SECRET未配置")
+        if not sms_config.SIGN_NAME:
+            config_errors.append("SIGN_NAME未配置")
+        if not sms_config.TEMPLATE_CODE:
+            config_errors.append("TEMPLATE_CODE未配置")
+
+        if config_errors:
+            return {
+                "status": "error",
+                "message": "短信配置不完整",
+                "details": config_errors,
+            }
+
+        # 尝试创建客户端
+        try:
+            client = SMSService.create_client(request)
+            if not client:
+                return {
+                    "status": "error",
+                    "message": "短信客户端创建失败",
+                    "details": "请检查ACCESS_KEY_ID和ACCESS_KEY_SECRET是否正确",
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": "短信客户端创建异常",
+                "details": str(e),
+            }
+
+        # 创建测试请求（但不实际发送）
+        try:
+            sms_request = dysmsapi_models.SendSmsRequest(
+                phone_numbers=test_phone,
+                sign_name=sms_config.SIGN_NAME,
+                template_code=sms_config.TEMPLATE_CODE,
+                template_param=json.dumps({"code": test_code}),
+            )
+
+            log.info("短信请求对象创建成功")
+
+            return {
+                "status": "success",
+                "message": "短信配置测试通过",
+                "details": {
+                    "sdk_available": True,
+                    "client_created": True,
+                    "request_created": True,
+                    "config_complete": True,
+                    "note": "实际发送功能正常，此测试未真正发送短信",
+                },
+            }
+
+        except Exception as e:
+            return {"status": "error", "message": "短信请求创建失败", "details": str(e)}
+
+    except Exception as e:
+        log.error(f"短信发送测试失败: {str(e)}")
+        return {"status": "error", "message": "测试过程异常", "details": str(e)}
+
+
+############################
+# 微信用户绑定手机号接口
+############################
+
+
+class WeChatBindPhoneForm(BaseModel):
+    openid: str = Field(..., description="微信openid")
+    scene_id: str = Field(..., description="场景值")
+    phone_number: str = Field(..., description="手机号码")
+    verification_code: str = Field(..., description="验证码")
+
+
+@router.post("/wechat/bind-phone", response_model=SessionUserResponse)
+async def wechat_bind_phone(
+    request: Request, response: Response, form_data: WeChatBindPhoneForm
+):
+    """微信用户绑定手机号"""
+    if not request.app.state.config.ENABLE_WECHAT_LOGIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="微信登录服务未启用"
+        )
+
+    try:
+        openid = form_data.openid.strip()
+        scene_id = form_data.scene_id.strip()
+        phone_number = form_data.phone_number.strip()
+        verification_code = form_data.verification_code.strip()
+
+        # 验证场景值
+        if not WeChatFollowService.validate_scene_id(scene_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="无效的场景值或已过期"
+            )
+
+        # 验证手机号格式
+        if not validate_phone_number(phone_number):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
+            )
+
+        # 验证验证码
+        if not verify_code(phone_number, verification_code, "bind"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="验证码错误或已过期"
+            )
+
+        # 获取微信用户信息
+        user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
+
+        # 检查微信是否已有账号
+        wechat_email = f"{openid}@wechat.local"
+        wechat_user = Users.get_user_by_email(wechat_email)
+
+        if not wechat_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="微信账号不存在，请先进行微信登录",
+            )
+
+        # 检查并处理账号合并
+        merge_result = Auths.check_and_merge_wechat_phone_binding(
+            phone_number=phone_number,
+            wechat_openid=openid,
+            wechat_nickname=user_info.get("nickname"),
+            auth_metadata=user_info,
+        )
+
+        if not merge_result["can_proceed"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=merge_result["message"],
+            )
+
+        # 获取最终的用户信息
+        if merge_result.get("user"):
+            final_user = merge_result["user"]
+        else:
+            # 如果没有返回用户信息，重新获取微信用户
+            final_user = wechat_user
+
+        # 确保用户的可用登录方式包含手机号和微信
+        if final_user:
+            available_types = set()
+            if final_user.phone_number:
+                available_types.add("phone")
+            if final_user.wechat_openid:
+                available_types.add("wechat")
+            if final_user.email and not final_user.email.endswith(
+                ("@sms.local", "@wechat.local")
+            ):
+                available_types.add("email")
+
+            Users.update_user_by_id(
+                final_user.id,
+                {
+                    "available_login_types": ",".join(available_types),
+                    "binding_status": {
+                        "phone": "active" if final_user.phone_number else "inactive",
+                        "wechat": "active" if final_user.wechat_openid else "inactive",
+                        "email": (
+                            "active"
+                            if final_user.email
+                            and not final_user.email.endswith(
+                                ("@sms.local", "@wechat.local")
+                            )
+                            else "inactive"
+                        ),
+                    },
+                },
+            )
+
+            # 重新获取更新后的用户信息
+            final_user = Users.get_user_by_id(final_user.id)
+
+        # 生成JWT令牌
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+        token = create_token(
+            data={"id": final_user.id},
+            expires_delta=expires_delta,
+        )
+
+        datetime_expires_at = (
+            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+            if expires_at
+            else None
+        )
+
+        # 设置Cookie
+        response.set_cookie(
+            key="token",
+            value=token,
+            expires=datetime_expires_at,
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
+
+        # 获取用户权限
+        user_permissions = get_permissions(
+            final_user.id, request.app.state.config.USER_PERMISSIONS
+        )
+
+        # 初始化用户积分
+        credit = Credits.init_credit_by_user_id(final_user.id)
+
+        # 清理场景值
+        if scene_id in wechat_follow_states:
+            del wechat_follow_states[scene_id]
+
+        return {
+            "token": token,
+            "token_type": "Bearer",
+            "expires_at": expires_at,
+            "id": final_user.id,
+            "email": final_user.email,
+            "name": final_user.name,
+            "role": final_user.role,
+            "profile_image_url": final_user.profile_image_url,
+            "permissions": user_permissions,
+            "credit": credit.credit,
+            "phone_number": final_user.phone_number,
+            "wechat_openid": final_user.wechat_openid,
+            "wechat_nickname": final_user.wechat_nickname,
+            "primary_login_type": final_user.primary_login_type,
+            "available_login_types": final_user.available_login_types,
+            "binding_status": final_user.binding_status,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"微信绑定手机号失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"绑定失败: {str(e)}",
+        )

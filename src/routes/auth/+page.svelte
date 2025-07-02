@@ -19,7 +19,8 @@
 		bindPhoneNumber,
 		smsSignin,
 		bindWeChat,
-		registerWithWeChatBinding
+		registerWithWeChatBinding,
+		weChatBindPhone
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -397,7 +398,25 @@
 					// 处理关注成功，进行登录
 					try {
 						const sessionUser = await weChatFollowLogin(response.openid, wechatSceneId);
-						await setSessionUser(sessionUser);
+						
+						// 检查登录结果
+						if (sessionUser.success === false && sessionUser.need_phone_binding) {
+							// 需要绑定手机号
+							needBindPhone = true;
+							showBindPhoneModal = true;
+							tokenUser = {
+								...sessionUser.user_info,
+								openid: sessionUser.openid,
+								scene_id: sessionUser.scene_id
+							};
+							toast.info(sessionUser.message || '请先绑定手机号完成账号设置');
+						} else if (sessionUser.success !== false) {
+							// 登录成功
+							await setSessionUser(sessionUser);
+						} else {
+							// 其他错误
+							throw new Error(sessionUser.message || '微信登录失败');
+						}
 					} catch (loginError) {
 						console.error('微信登录失败:', loginError);
 						toast.error(`微信登录失败: ${loginError}`);
@@ -500,13 +519,35 @@
 		}
 
 		try {
-			await bindPhoneNumber(phone, phonecode, tokenUser.token);
-			toast.success('手机号绑定成功！');
-			showBindPhoneModal = false;
-			needBindPhone = false;
-			// 绑定成功后跳转
-			const redirectPath = querystringValue('redirect') || '/';
-			goto(redirectPath);
+			let sessionUser;
+			
+			// 检查是否是微信用户绑定手机号
+			if (tokenUser.openid && tokenUser.scene_id) {
+				// 调用微信用户绑定手机号接口
+				sessionUser = await weChatBindPhone(
+					tokenUser.openid,
+					tokenUser.scene_id,
+					phone,
+					phonecode
+				);
+			} else {
+				// 普通用户绑定手机号
+				await bindPhoneNumber(phone, phonecode, tokenUser.token);
+				toast.success('手机号绑定成功！');
+				showBindPhoneModal = false;
+				needBindPhone = false;
+				// 绑定成功后跳转
+				const redirectPath = querystringValue('redirect') || '/';
+				goto(redirectPath);
+				return;
+			}
+
+			if (sessionUser) {
+				await setSessionUser(sessionUser);
+				toast.success('手机号绑定成功！');
+				showBindPhoneModal = false;
+				needBindPhone = false;
+			}
 		} catch (error) {
 			console.error('绑定手机号失败:', error);
 			toast.error(`绑定失败: ${error}`);

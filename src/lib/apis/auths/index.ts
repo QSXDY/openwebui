@@ -1080,3 +1080,40 @@ export const registerWithWeChatBinding = async (
 // 兼容性：保留旧的接口名称
 export const weChatLogin = weChatFollowLogin;
 export const checkWeChatLoginStatus = checkWeChatFollowStatus;
+
+// 微信用户绑定手机号
+export const weChatBindPhone = async (
+	openid: string,
+	scene_id: string,
+	phone_number: string,
+	verification_code: string
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/wechat/bind-phone`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			openid: openid,
+			scene_id: scene_id,
+			phone_number: phone_number,
+			verification_code: verification_code
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
