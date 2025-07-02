@@ -3499,70 +3499,116 @@ async def wechat_bind_phone(
                 detail=merge_result["message"],
             )
 
-        # 获取最终的用户信息
-        if merge_result.get("user"):
-            final_user = merge_result["user"]
-        else:
-            # 如果没有返回用户信息，重新获取微信用户
-            final_user = wechat_user
+        # 根据合并结果处理用户信息
+        final_user = None
 
-            # 手动更新Auth表中的手机号字段（备用方案）
-            if final_user and merge_result["action"] == "merge_to_wechat":
+        if merge_result.get("user"):
+            # 如果返回了用户信息，直接使用
+            final_user = merge_result["user"]
+            log.info(f"使用合并返回的用户信息: user_id={final_user.id}")
+        else:
+            # 如果没有返回用户信息，需要手动处理
+            log.warning(
+                f"merge_result没有返回用户信息，开始手动处理: action={merge_result.get('action')}"
+            )
+
+            if merge_result["action"] == "merge_to_wechat":
+                # 手动更新微信用户的手机号
                 log.info(
-                    f"手动更新Auth表中的手机号字段: user_id={final_user.id}, phone_number={phone_number}"
+                    f"手动为微信用户绑定手机号: user_id={wechat_user.id}, phone_number={phone_number}"
                 )
+
+                # 更新Auth表
                 auth_update_success = Auths.update_auth_binding_info(
-                    user_id=final_user.id,
+                    user_id=wechat_user.id,
                     login_type="phone",
                     phone_number=phone_number,
                 )
-                log.info(f"Auth表更新结果: {auth_update_success}")
 
-        # 确保用户的可用登录方式包含手机号和微信
-        if final_user:
-            available_types = set()
-            if final_user.phone_number:
-                available_types.add("phone")
-            if final_user.wechat_openid:
-                available_types.add("wechat")
-            if final_user.email and not final_user.email.endswith(
-                ("@sms.local", "@wechat.local")
-            ):
-                available_types.add("email")
+                if not auth_update_success:
+                    log.error(f"手动更新Auth表失败: user_id={wechat_user.id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="绑定失败，无法更新认证信息",
+                    )
 
-            Users.update_user_by_id(
-                final_user.id,
-                {
-                    "available_login_types": ",".join(available_types),
-                    "binding_status": {
-                        "phone": "active" if final_user.phone_number else "inactive",
-                        "wechat": "active" if final_user.wechat_openid else "inactive",
-                        "email": (
-                            "active"
-                            if final_user.email
-                            and not final_user.email.endswith(
-                                ("@sms.local", "@wechat.local")
-                            )
-                            else "inactive"
-                        ),
-                    },
-                },
-            )
-
-            # 重新获取更新后的用户信息，确保数据同步
-            final_user = Users.get_user_by_id(final_user.id)
-
-            # 验证绑定是否成功
-            if not final_user.phone_number:
-                log.error(f"绑定失败，用户表中仍然没有手机号: user_id={final_user.id}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="手机号绑定失败，请重试",
+                # 重新获取用户信息，确保数据同步
+                final_user = Users.get_user_by_id(wechat_user.id)
+                log.info(
+                    f"手动更新后重新获取用户: user_id={final_user.id}, phone_number={final_user.phone_number}"
                 )
 
-            log.info(
-                f"绑定验证成功: user_id={final_user.id}, phone_number={final_user.phone_number}"
+            else:
+                # 其他情况，使用原微信用户但记录警告
+                log.warning(
+                    f"未知的合并action: {merge_result.get('action')}，使用原微信用户"
+                )
+                final_user = wechat_user
+
+        # 确保获取到了有效的用户信息
+        if not final_user:
+            log.error("无法获取有效的用户信息")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="获取用户信息失败",
             )
+
+        # 确保用户的可用登录方式包含手机号和微信
+        log.info(f"更新用户登录方式和绑定状态: user_id={final_user.id}")
+        available_types = set()
+        if final_user.phone_number:
+            available_types.add("phone")
+        if final_user.wechat_openid:
+            available_types.add("wechat")
+        if final_user.email and not final_user.email.endswith(
+            ("@sms.local", "@wechat.local")
+        ):
+            available_types.add("email")
+
+        Users.update_user_by_id(
+            final_user.id,
+            {
+                "available_login_types": ",".join(available_types),
+                "binding_status": {
+                    "phone": "active" if final_user.phone_number else "inactive",
+                    "wechat": "active" if final_user.wechat_openid else "inactive",
+                    "email": (
+                        "active"
+                        if final_user.email
+                        and not final_user.email.endswith(
+                            ("@sms.local", "@wechat.local")
+                        )
+                        else "inactive"
+                    ),
+                },
+            },
+        )
+
+        # 重新获取更新后的用户信息，确保数据同步
+        final_user = Users.get_user_by_id(final_user.id)
+
+        # 验证绑定是否成功（检查User表和Auth表）
+        if not final_user.phone_number:
+            log.error(f"绑定失败，用户表中仍然没有手机号: user_id={final_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="手机号绑定失败，请重试",
+            )
+
+        # 验证Auth表中的数据是否同步
+        auth_record = Auths.get_auth_by_id(final_user.id)
+        if not auth_record or not auth_record.phone_number:
+            log.error(
+                f"Auth表同步失败: user_id={final_user.id}, auth_phone={auth_record.phone_number if auth_record else 'None'}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="认证信息同步失败，请重试",
+            )
+
+        log.info(
+            f"绑定验证成功: user_id={final_user.id}, user_phone={final_user.phone_number}, auth_phone={auth_record.phone_number}"
+        )
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)

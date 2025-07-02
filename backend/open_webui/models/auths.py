@@ -535,6 +535,13 @@ class AuthsTable:
                             "user": merged_user,
                             "message": "微信已绑定到手机号账号",
                         }
+                    else:
+                        return {
+                            "action": "merge_to_phone",
+                            "can_proceed": False,
+                            "merged": False,
+                            "message": "绑定微信到手机号账号失败",
+                        }
 
             # 情况3：微信已被绑定，手机号未被绑定
             if wechat_auth and not phone_auth:
@@ -560,6 +567,13 @@ class AuthsTable:
                             "merged": True,
                             "user": merged_user,
                             "message": "手机号已绑定到微信账号",
+                        }
+                    else:
+                        return {
+                            "action": "merge_to_wechat",
+                            "can_proceed": False,
+                            "merged": False,
+                            "message": "绑定手机号到微信账号失败",
                         }
 
             # 情况4：都已被绑定
