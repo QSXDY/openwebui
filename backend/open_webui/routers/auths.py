@@ -1147,7 +1147,9 @@ async def wechat_follow_login(
 
         if user:
             # 用户已存在，检查是否绑定手机号
-            has_phone = bool(user.phone_number)
+            has_phone = bool(user.phone_number and user.phone_number.strip())
+            
+            log.info(f"用户手机号绑定状态检查: user_id={user.id}, phone_number='{user.phone_number}', has_phone={has_phone}")
 
             if not has_phone:
                 # 未绑定手机号，返回要求绑定手机号的响应
@@ -1218,6 +1220,19 @@ async def wechat_follow_login(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="创建用户失败",
                     )
+                
+                # 验证微信字段是否正确设置
+                if not user.wechat_openid:
+                    log.warning(f"新创建的用户缺少微信openid，手动设置: user_id={user.id}")
+                    # 手动更新Auth表中的微信字段
+                    Auths.update_auth_binding_info(
+                        user_id=user.id,
+                        login_type="wechat",
+                        wechat_openid=form_data.openid,
+                        auth_metadata=user_info,
+                    )
+                    # 重新获取用户信息
+                    user = Users.get_user_by_id(user.id)
             except Exception as insert_error:
                 log.error(f"调用 Auths.insert_new_auth 时发生异常: {str(insert_error)}")
                 raise HTTPException(
@@ -1974,6 +1989,36 @@ async def register_with_wechat_binding(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="用户创建失败",
                 )
+            
+            # 验证创建的用户字段是否正确
+            log.info(f"验证新创建的用户字段: user_id={final_user.id}, phone_number={final_user.phone_number}, wechat_openid={final_user.wechat_openid}")
+            
+            # 如果缺少字段，手动补充
+            missing_fields = []
+            if not final_user.phone_number:
+                missing_fields.append("phone_number")
+            if not final_user.wechat_openid:
+                missing_fields.append("wechat_openid")
+            
+            if missing_fields:
+                log.warning(f"新创建的用户缺少字段: {missing_fields}，手动补充")
+                # 手动更新Auth表中缺少的字段
+                if "phone_number" in missing_fields:
+                    Auths.update_auth_binding_info(
+                        user_id=final_user.id,
+                        login_type="phone",
+                        phone_number=phone_number,
+                    )
+                if "wechat_openid" in missing_fields:
+                    Auths.update_auth_binding_info(
+                        user_id=final_user.id,
+                        login_type="wechat",
+                        wechat_openid=openid,
+                        wechat_unionid=user_info.get("unionid"),
+                        auth_metadata=user_info,
+                    )
+                # 重新获取用户信息
+                final_user = Users.get_user_by_id(final_user.id)
 
             # 更新用户绑定信息
             Users.update_user_by_id(
@@ -3276,6 +3321,66 @@ async def test_sms_send(request: Request, user=Depends(get_admin_user)):
 
 
 ############################
+# 调试用户绑定状态接口
+############################
+
+
+@router.get("/debug/binding-status/{user_id}")
+async def debug_user_binding_status(user_id: str, admin_user=Depends(get_admin_user)):
+    """调试用户绑定状态（仅管理员）"""
+    try:
+        # 获取用户信息
+        user = Users.get_user_by_id(user_id)
+        if not user:
+            return {"error": "用户不存在"}
+
+        # 获取Auth表信息
+        auth_by_email = Auths.get_auth_by_email(user.email) if user.email else None
+        auth_by_phone = Auths.get_auth_by_phone_number(user.phone_number) if user.phone_number else None
+        auth_by_wechat = Auths.get_auth_by_wechat_openid(user.wechat_openid) if user.wechat_openid else None
+
+        return {
+            "user_info": {
+                "id": user.id,
+                "email": user.email,
+                "phone_number": user.phone_number,
+                "wechat_openid": user.wechat_openid,
+                "wechat_nickname": user.wechat_nickname,
+                "primary_login_type": user.primary_login_type,
+                "available_login_types": user.available_login_types,
+                "binding_status": user.binding_status,
+            },
+            "auth_table_info": {
+                "auth_by_email": {
+                    "exists": bool(auth_by_email),
+                    "phone_number": auth_by_email.phone_number if auth_by_email else None,
+                    "wechat_openid": auth_by_email.wechat_openid if auth_by_email else None,
+                } if auth_by_email else None,
+                "auth_by_phone": {
+                    "exists": bool(auth_by_phone),
+                    "email": auth_by_phone.email if auth_by_phone else None,
+                    "wechat_openid": auth_by_phone.wechat_openid if auth_by_phone else None,
+                } if auth_by_phone else None,
+                "auth_by_wechat": {
+                    "exists": bool(auth_by_wechat),
+                    "email": auth_by_wechat.email if auth_by_wechat else None,
+                    "phone_number": auth_by_wechat.phone_number if auth_by_wechat else None,
+                } if auth_by_wechat else None,
+            },
+            "binding_analysis": {
+                "phone_properly_bound": bool(user.phone_number and user.phone_number.strip()),
+                "wechat_properly_bound": bool(user.wechat_openid and user.wechat_openid.strip()),
+                "auth_table_sync": {
+                    "phone_in_auth": bool(auth_by_email and auth_by_email.phone_number) if auth_by_email else False,
+                    "wechat_in_auth": bool(auth_by_email and auth_by_email.wechat_openid) if auth_by_email else False,
+                },
+            },
+        }
+    except Exception as e:
+        return {"error": f"调试失败: {str(e)}"}
+
+
+############################
 # 微信用户绑定手机号接口
 ############################
 
@@ -3354,6 +3459,16 @@ async def wechat_bind_phone(
         else:
             # 如果没有返回用户信息，重新获取微信用户
             final_user = wechat_user
+            
+            # 手动更新Auth表中的手机号字段（备用方案）
+            if final_user and merge_result["action"] == "merge_to_wechat":
+                log.info(f"手动更新Auth表中的手机号字段: user_id={final_user.id}, phone_number={phone_number}")
+                auth_update_success = Auths.update_auth_binding_info(
+                    user_id=final_user.id,
+                    login_type="phone",
+                    phone_number=phone_number,
+                )
+                log.info(f"Auth表更新结果: {auth_update_success}")
 
         # 确保用户的可用登录方式包含手机号和微信
         if final_user:
@@ -3386,8 +3501,18 @@ async def wechat_bind_phone(
                 },
             )
 
-            # 重新获取更新后的用户信息
+            # 重新获取更新后的用户信息，确保数据同步
             final_user = Users.get_user_by_id(final_user.id)
+            
+            # 验证绑定是否成功
+            if not final_user.phone_number:
+                log.error(f"绑定失败，用户表中仍然没有手机号: user_id={final_user.id}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="手机号绑定失败，请重试",
+                )
+            
+            log.info(f"绑定验证成功: user_id={final_user.id}, phone_number={final_user.phone_number}")
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
