@@ -1104,7 +1104,7 @@ async def get_wechat_follow_qr_code(request: Request):
         )
 
 
-@router.post("/wechat/follow-login", response_model=SessionUserResponse)
+@router.post("/wechat/follow-login")
 async def wechat_follow_login(
     request: Request, response: Response, form_data: WeChatLoginForm
 ):
@@ -1123,11 +1123,21 @@ async def wechat_follow_login(
             )
 
         # 获取微信用户信息
-        user_info = await WeChatFollowService.get_wechat_user_info(
-            request, form_data.openid
-        )
+        try:
+            user_info = await WeChatFollowService.get_wechat_user_info(
+                request, form_data.openid
+            )
+            log.info(f"微信用户信息: {user_info}")
 
-        log.info(f"微信用户信息: {user_info}")
+            if not user_info:
+                raise ValueError("获取微信用户信息失败，返回空数据")
+
+        except Exception as user_info_error:
+            log.error(f"获取微信用户信息失败: {str(user_info_error)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"获取微信用户信息失败: {str(user_info_error)}",
+            )
 
         # 使用openid作为唯一标识
         email = f"{form_data.openid}@wechat.local"
@@ -1187,22 +1197,32 @@ async def wechat_follow_login(
                 f"创建微信用户: nickname={nickname}, profile_image_url={profile_image_url}"
             )
 
-            user = Auths.insert_new_auth(
-                email=email,
-                password=str(uuid.uuid4()),  # 随机密码，微信用户不使用密码登录
-                name=nickname,
-                role=role,
-                profile_image_url=profile_image_url,
-                login_type="wechat",
-                external_id=form_data.openid,
-                wechat_openid=form_data.openid,
-                auth_metadata=user_info,
-            )
+            try:
+                user = Auths.insert_new_auth(
+                    email=email,
+                    password=str(uuid.uuid4()),  # 随机密码，微信用户不使用密码登录
+                    name=nickname,
+                    role=role,
+                    profile_image_url=profile_image_url,
+                    login_type="wechat",
+                    external_id=form_data.openid,
+                    wechat_openid=form_data.openid,
+                    auth_metadata=user_info,
+                )
 
-            if not user:
+                log.info(f"Auths.insert_new_auth 返回结果: {user}")
+
+                if not user:
+                    log.error(f"创建微信用户失败，Auths.insert_new_auth 返回了 None")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="创建用户失败",
+                    )
+            except Exception as insert_error:
+                log.error(f"调用 Auths.insert_new_auth 时发生异常: {str(insert_error)}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="创建用户失败",
+                    detail=f"创建用户失败: {str(insert_error)}",
                 )
 
             # 新创建的用户需要绑定手机号
@@ -1297,10 +1317,15 @@ async def wechat_follow_login(
             "binding_status": user.binding_status,
         }
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # 重新抛出已经处理过的HTTP异常
+        log.error(f"微信登录HTTP异常: {http_exc.detail}")
         raise
     except Exception as e:
         log.error(f"微信登录失败: {str(e)}")
+        import traceback
+
+        log.error(f"异常详情: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"登录失败: {str(e)}",
