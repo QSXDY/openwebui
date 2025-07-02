@@ -1195,7 +1195,6 @@ async def wechat_follow_login(
                 profile_image_url=profile_image_url,
                 login_type="wechat",
                 external_id=form_data.openid,
-                wechat_nickname=nickname,
                 wechat_openid=form_data.openid,
                 auth_metadata=user_info,
             )
