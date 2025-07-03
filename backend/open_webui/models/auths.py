@@ -387,6 +387,17 @@ class AuthsTable:
             print(f"更新认证绑定信息失败: {str(e)}")
             return False
 
+    def get_auth_by_id(self, user_id: str) -> Optional[AuthModel]:
+        """根据用户ID获取认证信息"""
+        try:
+            with get_db() as db:
+                auth = db.query(Auth).filter_by(id=user_id, active=True).first()
+                if auth:
+                    return AuthModel.model_validate(auth)
+                return None
+        except Exception:
+            return None
+
     def get_auth_by_phone_number(self, phone_number: str) -> Optional[AuthModel]:
         """根据手机号获取认证信息"""
         try:
@@ -506,6 +517,8 @@ class AuthsTable:
                 return {
                     "action": "create_new",
                     "can_proceed": True,
+                    "merged": False,
+                    "user": None,
                     "message": "可以创建新账号",
                 }
 
@@ -516,6 +529,8 @@ class AuthsTable:
                     return {
                         "action": "conflict",
                         "can_proceed": False,
+                        "merged": False,
+                        "user": None,
                         "message": "手机号已被绑定且该账号已有微信",
                     }
                 else:
@@ -540,6 +555,7 @@ class AuthsTable:
                             "action": "merge_to_phone",
                             "can_proceed": False,
                             "merged": False,
+                            "user": None,
                             "message": "绑定微信到手机号账号失败",
                         }
 
@@ -550,6 +566,8 @@ class AuthsTable:
                     return {
                         "action": "conflict",
                         "can_proceed": False,
+                        "merged": False,
+                        "user": None,
                         "message": "微信已被绑定且该账号已有手机号",
                     }
                 else:
@@ -573,6 +591,7 @@ class AuthsTable:
                             "action": "merge_to_wechat",
                             "can_proceed": False,
                             "merged": False,
+                            "user": None,
                             "message": "绑定手机号到微信账号失败",
                         }
 
@@ -591,17 +610,38 @@ class AuthsTable:
                     return {
                         "action": "conflict",
                         "can_proceed": False,
+                        "merged": False,
+                        "user": None,
                         "message": "手机号和微信已被不同账号绑定",
                     }
 
-            return {"action": "unknown", "can_proceed": False, "message": "未知状态"}
+            return {
+                "action": "unknown",
+                "can_proceed": False,
+                "merged": False,
+                "user": None,
+                "message": "未知状态",
+            }
 
         except Exception as e:
             return {
                 "action": "error",
                 "can_proceed": False,
+                "merged": False,
+                "user": None,
                 "message": f"检查绑定关系时出错: {str(e)}",
             }
+
+    def get_auth_by_id(self, user_id: str) -> Optional[AuthModel]:
+        """根据用户ID获取认证信息"""
+        try:
+            with get_db() as db:
+                auth = db.query(Auth).filter_by(id=user_id, active=True).first()
+                if auth:
+                    return AuthModel.model_validate(auth)
+                return None
+        except Exception:
+            return None
 
 
 class UserBindingsTable:

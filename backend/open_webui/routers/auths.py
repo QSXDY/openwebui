@@ -1146,32 +1146,67 @@ async def wechat_follow_login(
         user = Users.get_user_by_email(email)
 
         if user:
-            # 用户已存在，检查是否绑定手机号
+            # 用户已存在，检查绑定状态
             has_phone = bool(user.phone_number and user.phone_number.strip())
+            has_wechat = bool(user.wechat_openid and user.wechat_openid.strip())
 
             log.info(
-                f"用户手机号绑定状态检查: user_id={user.id}, phone_number='{user.phone_number}', has_phone={has_phone}"
+                f"用户绑定状态检查: user_id={user.id}, phone_number='{user.phone_number}', wechat_openid='{user.wechat_openid}', has_phone={has_phone}, has_wechat={has_wechat}"
             )
 
-            if not has_phone:
-                # 未绑定手机号，返回要求绑定手机号的响应
-                return {
-                    "success": False,
-                    "need_phone_binding": True,
-                    "openid": form_data.openid,
-                    "scene_id": form_data.scene_id,
-                    "user_info": {
-                        "id": user.id,
-                        "name": user.name,
-                        "profile_image_url": user.profile_image_url,
-                        "wechat_nickname": user.wechat_nickname
-                        or user_info.get("nickname", ""),
-                    },
-                    "message": "请先绑定手机号完成账号设置",
-                }
+            # 如果用户已有微信绑定但未绑定手机号，提示绑定手机号但允许直接登录
+            if has_wechat and not has_phone:
+                # 微信已绑定但未绑定手机号，建议绑定手机号但可以直接登录
+                log.info(f"微信用户未绑定手机号，建议绑定但允许登录: {user.email}")
 
-            # 已绑定手机号，直接登录
-            log.info(f"微信用户已绑定手机号，直接登录: {user.email}")
+                # 可以选择直接登录或要求绑定手机号
+                # 这里根据业务需求决定：如果要求必须绑定手机号，返回需要绑定的响应
+                # 如果允许仅微信登录，继续执行登录流程
+
+                # 根据配置决定是否要求强制绑定手机号
+                require_phone_binding = request.app.state.config.get(
+                    "REQUIRE_PHONE_BINDING_FOR_WECHAT", False
+                )
+
+                if require_phone_binding:
+                    return {
+                        "success": False,
+                        "need_phone_binding": True,
+                        "openid": form_data.openid,
+                        "scene_id": form_data.scene_id,
+                        "user_info": {
+                            "id": user.id,
+                            "name": user.name,
+                            "profile_image_url": user.profile_image_url,
+                            "wechat_nickname": user.wechat_nickname
+                            or user_info.get("nickname", ""),
+                        },
+                        "message": "建议绑定手机号以获得更好的账号安全保护",
+                    }
+                # 否则继续登录流程
+
+            elif not has_wechat:
+                # 如果用户没有微信绑定信息，需要更新
+                log.warning(f"用户缺少微信绑定信息，更新中: user_id={user.id}")
+                Users.update_user_by_id(
+                    user.id,
+                    {
+                        "wechat_openid": form_data.openid,
+                        "wechat_nickname": user_info.get("nickname", ""),
+                    },
+                )
+                # 同时更新Auth表
+                Auths.update_auth_binding_info(
+                    user_id=user.id,
+                    login_type="wechat",
+                    wechat_openid=form_data.openid,
+                    auth_metadata=user_info,
+                )
+                # 重新获取用户信息
+                user = Users.get_user_by_id(user.id)
+
+            # 继续登录流程
+            log.info(f"微信用户登录: {user.email}, 手机号绑定状态: {has_phone}")
         else:
             # 用户不存在，创建新用户
             user_count = Users.get_num_users()

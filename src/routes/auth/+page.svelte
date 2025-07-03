@@ -20,7 +20,8 @@
 		smsSignin,
 		bindWeChat,
 		registerWithWeChatBinding,
-		weChatBindPhone
+		weChatBindPhone,
+		checkPhoneExists
 	} from '$lib/apis/auths';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -247,6 +248,12 @@
 	async function sendCode() {
 		console.log('sendCode发送验证码', phone);
 
+		// 验证手机号格式
+		if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+			toast.error('请输入正确的手机号格式');
+			return;
+		}
+
 		// 确定验证码类型
 		let codeType = 'register';
 		if (showBindPhoneModal) {
@@ -256,6 +263,30 @@
 		}
 
 		try {
+			// 发送验证码前检查手机号状态（仅在注册和绑定时检查）
+			if (codeType === 'register' || codeType === 'bind') {
+				const phoneStatus = await checkPhoneExists(phone);
+				if (phoneStatus.exists) {
+					if (codeType === 'register') {
+						const message = phoneStatus.details.registered_as_primary 
+							? '该手机号已注册，请使用登录功能'
+							: '该手机号已被其他账号绑定，请使用其他手机号';
+						toast.error(message);
+						return;
+					} else if (codeType === 'bind') {
+						toast.error('该手机号已被其他用户绑定，请使用其他手机号');
+						return;
+					}
+				}
+			} else if (codeType === 'login') {
+				// 登录时检查手机号是否已注册
+				const phoneStatus = await checkPhoneExists(phone);
+				if (!phoneStatus.exists) {
+					toast.error('该手机号尚未注册，请先注册或使用其他登录方式');
+					return;
+				}
+			}
+
 			const sessionUser = await smsSendsend(phone, codeType);
 			if (sessionUser.success) {
 				toast.success(`验证码发送成功，请注意查收。`);
