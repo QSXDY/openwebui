@@ -399,27 +399,18 @@ class WeChatFollowService:
         if not app_id or not app_secret:
             raise ValueError("微信公众号配置不完整")
 
-        # 获取access_token
-        token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+        # 使用缓存的access_token
+        access_token = await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
+
+        # 创建带参数二维码（临时二维码，10分钟过期）
+        qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
+        qr_data = {
+            "expire_seconds": 600,  # 10分钟过期
+            "action_name": "QR_STR_SCENE",
+            "action_info": {"scene": {"scene_str": scene_id}},
+        }
 
         async with ClientSession() as session:
-            async with session.get(token_url) as response:
-                token_data = await response.json()
-                if "access_token" not in token_data:
-                    raise ValueError(
-                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
-                    )
-
-                access_token = token_data["access_token"]
-
-            # 创建带参数二维码（临时二维码，10分钟过期）
-            qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
-            qr_data = {
-                "expire_seconds": 600,  # 10分钟过期
-                "action_name": "QR_STR_SCENE",
-                "action_info": {"scene": {"scene_str": scene_id}},
-            }
-
             async with session.post(qr_url, json=qr_data) as response:
                 qr_response = await response.json()
                 if "ticket" not in qr_response:
@@ -479,31 +470,34 @@ class WeChatFollowService:
             log.error(f"生成公众号二维码失败: {str(e)}")
             raise ValueError(f"生成二维码失败: {str(e)}")
 
+    # 缓存access_token和用户信息
+    _access_token_cache = {"token": None, "expires_at": 0}
+    _user_info_cache = {}
+
     @staticmethod
     async def get_wechat_user_info(request: Request, openid: str) -> dict:
-        """获取微信用户信息"""
+        """获取微信用户信息（带缓存优化）"""
         app_id = request.app.state.config.WECHAT_APP_ID
         app_secret = request.app.state.config.WECHAT_APP_SECRET
 
         if not app_id or not app_secret:
             raise ValueError("微信公众号配置不完整")
 
-        # 获取access_token
-        token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+        # 检查用户信息缓存
+        cache_key = f"user_info_{openid}"
+        if cache_key in WeChatFollowService._user_info_cache:
+            cached_info = WeChatFollowService._user_info_cache[cache_key]
+            if time.time() < cached_info.get("expires_at", 0):
+                log.info(f"使用缓存的用户信息: {openid}")
+                return cached_info["data"]
+
+        # 获取或刷新access_token
+        access_token = await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
+
+        # 获取用户信息
+        user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
 
         async with ClientSession() as session:
-            async with session.get(token_url) as response:
-                token_data = await response.json()
-                if "access_token" not in token_data:
-                    raise ValueError(
-                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
-                    )
-
-                access_token = token_data["access_token"]
-
-            # 获取用户信息
-            user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
-
             async with session.get(user_url) as response:
                 user_data = await response.json()
                 if "openid" not in user_data:
@@ -548,17 +542,27 @@ class WeChatFollowService:
                 if not processed_data["headimgurl"]:
                     log.warning(f"用户 {openid} 的头像为空，可能是隐私设置限制")
 
+                # 缓存用户信息（5分钟）
+                WeChatFollowService._user_info_cache[cache_key] = {
+                    "data": processed_data,
+                    "expires_at": time.time() + 300  # 5分钟缓存
+                }
+
                 return processed_data
 
     @staticmethod
-    async def get_access_token(request: Request) -> str:
-        """获取微信Access Token"""
-        app_id = request.app.state.config.WECHAT_APP_ID
-        app_secret = request.app.state.config.WECHAT_APP_SECRET
+    async def _get_cached_access_token(request: Request, app_id: str, app_secret: str) -> str:
+        """获取缓存的access_token"""
+        current_time = time.time()
+        
+        # 检查缓存是否有效（access_token有效期2小时，我们提前5分钟刷新）
+        if (WeChatFollowService._access_token_cache["token"] and 
+            current_time < WeChatFollowService._access_token_cache["expires_at"] - 300):
+            log.info("使用缓存的access_token")
+            return WeChatFollowService._access_token_cache["token"]
 
-        if not app_id or not app_secret:
-            raise ValueError("微信公众号配置不完整")
-
+        # 获取新的access_token
+        log.info("获取新的access_token")
         token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
 
         async with ClientSession() as session:
@@ -568,7 +572,28 @@ class WeChatFollowService:
                     raise ValueError(
                         f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
                     )
-                return token_data["access_token"]
+
+                access_token = token_data["access_token"]
+                expires_in = token_data.get("expires_in", 7200)  # 默认2小时
+
+                # 更新缓存
+                WeChatFollowService._access_token_cache = {
+                    "token": access_token,
+                    "expires_at": current_time + expires_in
+                }
+
+                return access_token
+
+    @staticmethod
+    async def get_access_token(request: Request) -> str:
+        """获取微信Access Token（使用缓存）"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        if not app_id or not app_secret:
+            raise ValueError("微信公众号配置不完整")
+
+        return await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
 
     @staticmethod
     async def send_text_message(request: Request, openid: str, content: str) -> bool:
@@ -1133,11 +1158,8 @@ async def wechat_follow_login(
                 detail=f"获取微信用户信息失败: {str(user_info_error)}",
             )
 
-        # 使用openid作为唯一标识
-        email = f"{form_data.openid}@wechat.local"
-
-        # 查找用户
-        user = Users.get_user_by_email(email)
+        # 使用微信openid查找用户
+        user = Users.get_user_by_wechat_openid(form_data.openid)
 
         if user:
             # 用户已存在，检查绑定状态
@@ -1274,7 +1296,7 @@ async def wechat_follow_login(
 
             try:
                 user = Auths.insert_new_auth(
-                    email=email,
+                    email=None,  # 不使用伪邮箱
                     password=str(uuid.uuid4()),  # 随机密码，微信用户不使用密码登录
                     name=nickname,
                     role=role,
@@ -3452,8 +3474,7 @@ async def wechat_bind_phone(
         user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
 
         # 检查微信是否已有账号
-        wechat_email = f"{openid}@wechat.local"
-        wechat_user = Users.get_user_by_email(wechat_email)
+        wechat_user = Users.get_user_by_wechat_openid(openid)
 
         if not wechat_user:
             raise HTTPException(
@@ -3461,65 +3482,44 @@ async def wechat_bind_phone(
                 detail="微信账号不存在，请先进行微信登录",
             )
 
-        # 检查并处理账号合并
-        merge_result = Auths.check_and_merge_wechat_phone_binding(
-            phone_number=phone_number,
-            wechat_openid=openid,
-            wechat_nickname=user_info.get("nickname"),
-            auth_metadata=user_info,
-        )
-
-        if not merge_result["can_proceed"]:
+        # 检查手机号是否已被其他用户使用
+        phone_auth = Auths.get_auth_by_phone_number(phone_number)
+        phone_user = Users.get_user_by_phone_number(phone_number)
+        
+        if (phone_auth and phone_auth.id != wechat_user.id) or (phone_user and phone_user.id != wechat_user.id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=merge_result["message"],
+                detail="该手机号已被其他用户使用",
             )
 
-        # 根据合并结果处理用户信息
-        final_user = None
+        # 直接为微信用户绑定手机号
+        log.info(f"为微信用户绑定手机号: user_id={wechat_user.id}, phone_number={phone_number}")
 
-        if merge_result.get("user"):
-            # 如果返回了用户信息，直接使用
-            final_user = merge_result["user"]
-            log.info(f"使用合并返回的用户信息: user_id={final_user.id}")
-        else:
-            # 如果没有返回用户信息，需要手动处理
-            log.warning(
-                f"merge_result没有返回用户信息，开始手动处理: action={merge_result.get('action')}"
+        # 更新用户的手机号信息
+        Users.update_user_by_id(
+            wechat_user.id,
+            {
+                "phone_number": phone_number,
+            },
+        )
+
+        # 更新Auth表
+        auth_update_success = Auths.update_auth_binding_info(
+            user_id=wechat_user.id,
+            login_type="phone",
+            phone_number=phone_number,
+        )
+
+        if not auth_update_success:
+            log.error(f"更新Auth表失败: user_id={wechat_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="绑定失败，无法更新认证信息",
             )
 
-            if merge_result["action"] == "merge_to_wechat":
-                # 手动更新微信用户的手机号
-                log.info(
-                    f"手动为微信用户绑定手机号: user_id={wechat_user.id}, phone_number={phone_number}"
-                )
-
-                # 更新Auth表
-                auth_update_success = Auths.update_auth_binding_info(
-                    user_id=wechat_user.id,
-                    login_type="phone",
-                    phone_number=phone_number,
-                )
-
-                if not auth_update_success:
-                    log.error(f"手动更新Auth表失败: user_id={wechat_user.id}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="绑定失败，无法更新认证信息",
-                    )
-
-                # 重新获取用户信息，确保数据同步
-                final_user = Users.get_user_by_id(wechat_user.id)
-                log.info(
-                    f"手动更新后重新获取用户: user_id={final_user.id}, phone_number={final_user.phone_number}"
-                )
-
-            else:
-                # 其他情况，使用原微信用户但记录警告
-                log.warning(
-                    f"未知的合并action: {merge_result.get('action')}，使用原微信用户"
-                )
-                final_user = wechat_user
+        # 重新获取用户信息，确保数据同步
+        final_user = Users.get_user_by_id(wechat_user.id)
+        log.info(f"绑定成功，用户信息: user_id={final_user.id}, phone_number={final_user.phone_number}")
 
         # 确保获取到了有效的用户信息
         if not final_user:
@@ -3529,33 +3529,28 @@ async def wechat_bind_phone(
                 detail="获取用户信息失败",
             )
 
-        # 确保用户的可用登录方式包含手机号和微信
+        # 更新用户的可用登录方式和绑定状态
         log.info(f"更新用户登录方式和绑定状态: user_id={final_user.id}")
-        available_types = set()
+        
+        # 确保登录方式包含手机号和微信
+        current_login_types = getattr(final_user, "available_login_types", "") or getattr(final_user, "primary_login_type", "wechat")
+        login_types_set = set(current_login_types.split(",")) if current_login_types else set()
+        
         if final_user.phone_number:
-            available_types.add("phone")
+            login_types_set.add("phone")
         if final_user.wechat_openid:
-            available_types.add("wechat")
-        if final_user.email and not final_user.email.endswith(
-            ("@sms.local", "@wechat.local")
-        ):
-            available_types.add("email")
+            login_types_set.add("wechat")
+        if final_user.email and not final_user.email.endswith(("@sms.local", "@wechat.local")):
+            login_types_set.add("email")
 
         Users.update_user_by_id(
             final_user.id,
             {
-                "available_login_types": ",".join(available_types),
+                "available_login_types": ",".join(sorted(login_types_set)),
                 "binding_status": {
+                    **getattr(final_user, "binding_status", {}),
                     "phone": "active" if final_user.phone_number else "inactive",
                     "wechat": "active" if final_user.wechat_openid else "inactive",
-                    "email": (
-                        "active"
-                        if final_user.email
-                        and not final_user.email.endswith(
-                            ("@sms.local", "@wechat.local")
-                        )
-                        else "inactive"
-                    ),
                 },
             },
         )
