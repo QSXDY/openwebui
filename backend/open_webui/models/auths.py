@@ -158,9 +158,9 @@ class AddUserForm(SignupForm):
 class AuthsTable:
     def insert_new_auth(
         self,
-        email: str,
-        password: str,
-        name: str,
+        email: Optional[str] = None,
+        password: str = "",
+        name: str = "",
         profile_image_url: str = "/user.png",
         role: str = "pending",
         oauth_sub: Optional[str] = None,
@@ -172,14 +172,28 @@ class AuthsTable:
         auth_metadata: Optional[dict] = None,
     ) -> Optional[UserModel]:
         with get_db() as db:
-            log.info("insert_new_auth")
+            log.info(f"insert_new_auth: login_type={login_type}")
 
             id = str(uuid.uuid4())
+
+            # 根据登录类型设置email字段
+            if login_type == "phone" and phone_number:
+                # 手机号登录，email可以为空或设置为None
+                final_email = email if email else None
+            elif login_type == "wechat" and wechat_openid:
+                # 微信登录，email可以为空或设置为None
+                final_email = email if email else None
+            else:
+                # 邮箱登录，必须有email
+                if not email:
+                    log.error(f"Email required for login_type: {login_type}")
+                    return None
+                final_email = email
 
             auth = AuthModel(
                 **{
                     "id": id,
-                    "email": email,
+                    "email": final_email or "",  # 如果为None则设置为空字符串
                     "password": password,
                     "active": True,
                     "login_type": login_type,
@@ -205,7 +219,7 @@ class AuthsTable:
             user = Users.insert_new_user(
                 id,
                 name,
-                email,
+                final_email or "",  # 用户表也使用相同的email处理逻辑
                 profile_image_url,
                 role,
                 oauth_sub,
@@ -272,6 +286,44 @@ class AuthsTable:
                 if auth:
                     user = Users.get_user_by_id(auth.id)
                     return user
+        except Exception:
+            return None
+
+    def authenticate_user_by_phone(self, phone_number: str) -> Optional[UserModel]:
+        """通过手机号进行用户认证（用于短信验证码登录）"""
+        log.info(f"authenticate_user_by_phone: {phone_number}")
+        try:
+            with get_db() as db:
+                auth = (
+                    db.query(Auth)
+                    .filter_by(phone_number=phone_number, active=True)
+                    .first()
+                )
+                if auth:
+                    user = Users.get_user_by_id(auth.id)
+                    return user
+                else:
+                    return None
+        except Exception:
+            return None
+
+    def authenticate_user_by_wechat_openid(
+        self, wechat_openid: str
+    ) -> Optional[UserModel]:
+        """通过微信openid进行用户认证"""
+        log.info(f"authenticate_user_by_wechat_openid: {wechat_openid}")
+        try:
+            with get_db() as db:
+                auth = (
+                    db.query(Auth)
+                    .filter_by(wechat_openid=wechat_openid, active=True)
+                    .first()
+                )
+                if auth:
+                    user = Users.get_user_by_id(auth.id)
+                    return user
+                else:
+                    return None
         except Exception:
             return None
 

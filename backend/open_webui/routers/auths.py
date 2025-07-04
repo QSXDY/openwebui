@@ -890,12 +890,10 @@ async def send_sms_verification(request: Request, form_data: SendSMSForm):
     # 检查验证码类型的具体逻辑
     if form_data.type == "register":
         # 注册验证码：检查手机号是否已有账号
-        phone_email = f"{phone_number}@sms.local"
-        phone_user = Users.get_user_by_email(phone_email)
-        bound_user = Users.get_user_by_phone_number(phone_number)
         phone_auth = Auths.get_auth_by_phone_number(phone_number)
+        bound_user = Users.get_user_by_phone_number(phone_number)
 
-        if phone_user or bound_user or phone_auth:
+        if phone_auth or bound_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="该手机号已有关联账号，请使用登录功能",
@@ -911,12 +909,10 @@ async def send_sms_verification(request: Request, form_data: SendSMSForm):
 
     elif form_data.type == "bind":
         # 绑定验证码：检查手机号是否已被其他用户绑定
-        phone_email = f"{phone_number}@sms.local"
-        phone_user = Users.get_user_by_email(phone_email)
-        bound_user = Users.get_user_by_phone_number(phone_number)
         phone_auth = Auths.get_auth_by_phone_number(phone_number)
+        bound_user = Users.get_user_by_phone_number(phone_number)
 
-        if phone_user or bound_user or phone_auth:
+        if phone_auth or bound_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="该手机号已被其他用户绑定",
@@ -968,12 +964,10 @@ async def sms_register(
         )
 
     # 再次检查手机号是否已有账号（防止并发问题）
-    phone_email = f"{phone_number}@sms.local"
-    phone_user = Users.get_user_by_email(phone_email)
-    bound_user = Users.get_user_by_phone_number(phone_number)
     phone_auth = Auths.get_auth_by_phone_number(phone_number)
+    bound_user = Users.get_user_by_phone_number(phone_number)
 
-    if phone_user or bound_user or phone_auth:
+    if phone_auth or bound_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该手机号已有关联账号，请使用登录功能",
@@ -1208,7 +1202,49 @@ async def wechat_follow_login(
             # 继续登录流程
             log.info(f"微信用户登录: {user.email}, 手机号绑定状态: {has_phone}")
         else:
-            # 用户不存在，创建新用户
+            # 用户不存在，但需要检查是否有重复账号
+
+            # 1. 检查该微信openid是否已经绑定到其他用户
+            existing_wechat_user = Users.get_user_by_wechat_openid(form_data.openid)
+            if existing_wechat_user:
+                log.warning(
+                    f"微信openid {form_data.openid} 已绑定到其他用户: {existing_wechat_user.id}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该微信账号已绑定其他用户，请使用正确的登录方式或联系管理员",
+                )
+
+            # 2. 检查微信用户的手机号是否已被其他账号使用（如果微信提供了手机号信息）
+            wechat_phone = user_info.get("phone_number") or user_info.get("mobile")
+            if wechat_phone:
+                wechat_phone = wechat_phone.strip()
+                if wechat_phone and validate_phone_number(wechat_phone):
+                    # 检查手机号是否已被注册
+                    phone_auth = Auths.get_auth_by_phone_number(wechat_phone)
+                    bound_user = Users.get_user_by_phone_number(wechat_phone)
+
+                    if phone_auth or bound_user:
+                        existing_user = (
+                            bound_user or Users.get_user_by_id(phone_auth.id)
+                            if phone_auth
+                            else None
+                        )
+                        log.warning(
+                            f"微信用户的手机号 {wechat_phone} 已被用户 {existing_user.id if existing_user else 'unknown'} 使用"
+                        )
+
+                        # 返回需要绑定手机号的响应，但提示手机号冲突
+                        return {
+                            "success": False,
+                            "need_phone_binding": True,
+                            "phone_conflict": True,
+                            "openid": form_data.openid,
+                            "scene_id": form_data.scene_id,
+                            "message": f"检测到您的微信绑定的手机号 {wechat_phone[:3]}****{wechat_phone[-4:]} 已有关联账号，请使用其他手机号完成注册或登录已有账号",
+                        }
+
+            # 3. 没有冲突，创建新用户
             user_count = Users.get_num_users()
             role = (
                 "admin"
@@ -1637,10 +1673,6 @@ async def check_phone_exists(form_data: CheckPhoneForm):
             status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确"
         )
 
-    # 检查手机号是否已被注册（通过邮箱检查）
-    phone_email = f"{phone_number}@sms.local"
-    phone_user = Users.get_user_by_email(phone_email)
-
     # 检查手机号是否已被绑定（通过手机号字段检查）
     bound_user = Users.get_user_by_phone_number(phone_number)
 
@@ -1657,18 +1689,7 @@ async def check_phone_exists(form_data: CheckPhoneForm):
         },
     }
 
-    if phone_user:
-        result["exists"] = True
-        result["details"]["registered_as_primary"] = True
-        result["details"]["user_info"] = {
-            "id": phone_user.id,
-            "name": phone_user.name,
-            "email": phone_user.email,
-            "primary_login_type": phone_user.primary_login_type,
-            "wechat_openid": phone_user.wechat_openid,
-            "wechat_nickname": phone_user.wechat_nickname,
-        }
-    elif bound_user:
+    if bound_user:
         result["exists"] = True
         result["details"]["bound_to_other_account"] = True
         result["details"]["user_info"] = {
@@ -1723,76 +1744,40 @@ async def bind_phone_number(
         )
 
     # 检查手机号是否已被其他用户绑定
-    phone_email = f"{phone_number}@sms.local"
-    existing_user = Users.get_user_by_email(phone_email)
-    if existing_user and existing_user.id != user.id:
+    phone_auth = Auths.get_auth_by_phone_number(phone_number)
+    existing_user = Users.get_user_by_phone_number(phone_number)
+    if (phone_auth and phone_auth.id != user.id) or (
+        existing_user and existing_user.id != user.id
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号已被其他用户绑定"
         )
 
     try:
-        # 检查用户当前的登录类型
-        current_login_type = getattr(user, "primary_login_type", "email")
-
-        # 如果是微信用户绑定手机号
-        if "@wechat.local" in user.email or current_login_type == "wechat":
-            # 创建或更新手机号认证记录
-            phone_user = Users.get_user_by_email(phone_email)
-            if not phone_user:
-                # 为微信用户创建手机号登录方式
-                phone_user = Auths.insert_new_auth(
-                    email=phone_email,
-                    password=str(uuid.uuid4()),  # 随机密码，用短信登录
-                    name=user.name,
-                    role=user.role,
-                    profile_image_url=user.profile_image_url,
-                    login_type="phone",
-                    phone_number=phone_number,
-                )
-
-                if not phone_user:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="绑定失败",
-                    )
-
-                # 创建绑定关系
-                UserBindings.create_binding(
-                    primary_user_id=user.id,
-                    bound_user_id=phone_user.id,
-                    primary_login_type=current_login_type,
-                    bound_login_type="phone",
-                    binding_data={"phone_number": phone_number},
-                )
-
-            # 更新用户信息
-            Users.update_user_by_id(
-                user.id,
-                {
-                    "phone_number": phone_number,
-                    "available_login_types": f"{getattr(user, 'available_login_types', current_login_type)},phone",
-                    "binding_status": {
-                        **getattr(user, "binding_status", {}),
-                        "phone": "active",
-                    },
-                },
-            )
-        else:
-            # 邮箱用户直接更新手机号信息
-            Users.update_user_by_id(
-                user.id,
-                {
-                    "phone_number": phone_number,
-                    "available_login_types": f"{getattr(user, 'available_login_types', 'email')},phone",
-                    "binding_status": {
-                        **getattr(user, "binding_status", {}),
-                        "phone": "active",
-                    },
-                },
+        # 直接更新用户的手机号信息，不区分登录类型
+        current_login_types = getattr(user, "available_login_types", "") or getattr(
+            user, "primary_login_type", "email"
+        )
+        new_login_types = current_login_types
+        if "phone" not in current_login_types:
+            new_login_types = (
+                f"{current_login_types},phone" if current_login_types else "phone"
             )
 
-            # 更新认证表的手机号信息
-            Auths.update_auth_binding_info(user.id, "phone", phone_number=phone_number)
+        Users.update_user_by_id(
+            user.id,
+            {
+                "phone_number": phone_number,
+                "available_login_types": new_login_types,
+                "binding_status": {
+                    **getattr(user, "binding_status", {}),
+                    "phone": "active",
+                },
+            },
+        )
+
+        # 更新认证表的手机号信息
+        Auths.update_auth_binding_info(user.id, "phone", phone_number=phone_number)
 
         return {"success": True, "message": "手机号绑定成功"}
     except Exception as e:
@@ -1825,92 +1810,50 @@ async def bind_wechat(
         )
 
     # 检查微信是否已被其他用户绑定
-    wechat_email = f"{openid}@wechat.local"
-    existing_user = Users.get_user_by_email(wechat_email)
-    if existing_user and existing_user.id != user.id:
+    wechat_auth = Auths.get_auth_by_wechat_openid(openid)
+    existing_user = Users.get_user_by_wechat_openid(openid)
+    if (wechat_auth and wechat_auth.id != user.id) or (
+        existing_user and existing_user.id != user.id
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="该微信账号已被其他用户绑定"
         )
 
     try:
-        # 检查用户当前的登录类型
-        current_login_type = getattr(user, "primary_login_type", "email")
-
         # 获取微信用户信息
         user_info = await WeChatFollowService.get_wechat_user_info(request, openid)
 
-        # 如果是手机号或邮箱用户绑定微信
-        if "@sms.local" in user.email or current_login_type in ["phone", "email"]:
-            # 创建微信认证记录
-            wechat_user = Users.get_user_by_email(wechat_email)
-            if not wechat_user:
-                # 为当前用户创建微信登录方式
-                wechat_user = Auths.insert_new_auth(
-                    email=wechat_email,
-                    password=str(uuid.uuid4()),  # 随机密码，用微信登录
-                    name=user.name,
-                    role=user.role,
-                    profile_image_url=user_info.get(
-                        "headimgurl", user.profile_image_url
-                    ),
-                    login_type="wechat",
-                    wechat_openid=openid,
-                    wechat_unionid=user_info.get("unionid"),
-                    auth_metadata=user_info,
-                )
+        # 直接更新用户的微信绑定信息，不区分登录类型
+        current_login_types = getattr(user, "available_login_types", "") or getattr(
+            user, "primary_login_type", "email"
+        )
+        new_login_types = current_login_types
+        if "wechat" not in current_login_types:
+            new_login_types = (
+                f"{current_login_types},wechat" if current_login_types else "wechat"
+            )
 
-                if not wechat_user:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="绑定失败",
-                    )
-
-                # 创建绑定关系
-                UserBindings.create_binding(
-                    primary_user_id=user.id,
-                    bound_user_id=wechat_user.id,
-                    primary_login_type=current_login_type,
-                    bound_login_type="wechat",
-                    binding_data={
-                        "openid": openid,
-                        "nickname": user_info.get("nickname"),
-                    },
-                )
-
-            # 更新用户信息
-            Users.update_user_by_id(
-                user.id,
-                {
-                    "wechat_openid": openid,
-                    "wechat_nickname": user_info.get("nickname"),
-                    "available_login_types": f"{getattr(user, 'available_login_types', current_login_type)},wechat",
-                    "binding_status": {
-                        **getattr(user, "binding_status", {}),
-                        "wechat": "active",
-                    },
+        Users.update_user_by_id(
+            user.id,
+            {
+                "wechat_openid": openid,
+                "wechat_nickname": user_info.get("nickname"),
+                "available_login_types": new_login_types,
+                "binding_status": {
+                    **getattr(user, "binding_status", {}),
+                    "wechat": "active",
                 },
-            )
-        else:
-            # 微信用户直接更新绑定信息
-            Users.update_user_by_id(
-                user.id,
-                {
-                    "wechat_nickname": user_info.get("nickname"),
-                    "binding_status": {
-                        **getattr(user, "binding_status", {}),
-                        "wechat": "active",
-                    },
-                },
-            )
+            },
+        )
 
-            # 更新认证表的微信信息
-            Auths.update_auth_binding_info(
-                user.id,
-                "wechat",
-                wechat_openid=openid,
-                wechat_unionid=user_info.get("unionid"),
-                auth_metadata=user_info,
-            )
+        # 更新认证表的微信信息
+        Auths.update_auth_binding_info(
+            user.id,
+            "wechat",
+            wechat_openid=openid,
+            wechat_unionid=user_info.get("unionid"),
+            auth_metadata=user_info,
+        )
 
         # 清理场景值
         if scene_id in wechat_follow_states:
@@ -2007,11 +1950,9 @@ async def register_with_wechat_binding(
 
             hashed = get_password_hash(pending_data["password"])
 
-            # 使用手机号邮箱作为主邮箱，同时绑定微信信息
-            phone_email = f"{phone_number}@sms.local"
-
+            # 创建新用户，不使用伪邮箱
             final_user = Auths.insert_new_auth(
-                email=phone_email,
+                email=None,  # 不设置邮箱，使用自有字段
                 password=hashed,
                 name=user_name,
                 role=role,
