@@ -400,7 +400,9 @@ class WeChatFollowService:
             raise ValueError("微信公众号配置不完整")
 
         # 使用缓存的access_token
-        access_token = await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
+        access_token = await WeChatFollowService._get_cached_access_token(
+            request, app_id, app_secret
+        )
 
         # 创建带参数二维码（临时二维码，10分钟过期）
         qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
@@ -492,7 +494,9 @@ class WeChatFollowService:
                 return cached_info["data"]
 
         # 获取或刷新access_token
-        access_token = await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
+        access_token = await WeChatFollowService._get_cached_access_token(
+            request, app_id, app_secret
+        )
 
         # 获取用户信息
         user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
@@ -545,19 +549,24 @@ class WeChatFollowService:
                 # 缓存用户信息（5分钟）
                 WeChatFollowService._user_info_cache[cache_key] = {
                     "data": processed_data,
-                    "expires_at": time.time() + 300  # 5分钟缓存
+                    "expires_at": time.time() + 300,  # 5分钟缓存
                 }
 
                 return processed_data
 
     @staticmethod
-    async def _get_cached_access_token(request: Request, app_id: str, app_secret: str) -> str:
+    async def _get_cached_access_token(
+        request: Request, app_id: str, app_secret: str
+    ) -> str:
         """获取缓存的access_token"""
         current_time = time.time()
-        
+
         # 检查缓存是否有效（access_token有效期2小时，我们提前5分钟刷新）
-        if (WeChatFollowService._access_token_cache["token"] and 
-            current_time < WeChatFollowService._access_token_cache["expires_at"] - 300):
+        if (
+            WeChatFollowService._access_token_cache["token"]
+            and current_time
+            < WeChatFollowService._access_token_cache["expires_at"] - 300
+        ):
             log.info("使用缓存的access_token")
             return WeChatFollowService._access_token_cache["token"]
 
@@ -579,7 +588,7 @@ class WeChatFollowService:
                 # 更新缓存
                 WeChatFollowService._access_token_cache = {
                     "token": access_token,
-                    "expires_at": current_time + expires_in
+                    "expires_at": current_time + expires_in,
                 }
 
                 return access_token
@@ -593,7 +602,9 @@ class WeChatFollowService:
         if not app_id or not app_secret:
             raise ValueError("微信公众号配置不完整")
 
-        return await WeChatFollowService._get_cached_access_token(request, app_id, app_secret)
+        return await WeChatFollowService._get_cached_access_token(
+            request, app_id, app_secret
+        )
 
     @staticmethod
     async def send_text_message(request: Request, openid: str, content: str) -> bool:
@@ -3485,15 +3496,19 @@ async def wechat_bind_phone(
         # 检查手机号是否已被其他用户使用
         phone_auth = Auths.get_auth_by_phone_number(phone_number)
         phone_user = Users.get_user_by_phone_number(phone_number)
-        
-        if (phone_auth and phone_auth.id != wechat_user.id) or (phone_user and phone_user.id != wechat_user.id):
+
+        if (phone_auth and phone_auth.id != wechat_user.id) or (
+            phone_user and phone_user.id != wechat_user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="该手机号已被其他用户使用",
             )
 
         # 直接为微信用户绑定手机号
-        log.info(f"为微信用户绑定手机号: user_id={wechat_user.id}, phone_number={phone_number}")
+        log.info(
+            f"为微信用户绑定手机号: user_id={wechat_user.id}, phone_number={phone_number}"
+        )
 
         # 更新用户的手机号信息
         Users.update_user_by_id(
@@ -3519,7 +3534,9 @@ async def wechat_bind_phone(
 
         # 重新获取用户信息，确保数据同步
         final_user = Users.get_user_by_id(wechat_user.id)
-        log.info(f"绑定成功，用户信息: user_id={final_user.id}, phone_number={final_user.phone_number}")
+        log.info(
+            f"绑定成功，用户信息: user_id={final_user.id}, phone_number={final_user.phone_number}"
+        )
 
         # 确保获取到了有效的用户信息
         if not final_user:
@@ -3531,16 +3548,22 @@ async def wechat_bind_phone(
 
         # 更新用户的可用登录方式和绑定状态
         log.info(f"更新用户登录方式和绑定状态: user_id={final_user.id}")
-        
+
         # 确保登录方式包含手机号和微信
-        current_login_types = getattr(final_user, "available_login_types", "") or getattr(final_user, "primary_login_type", "wechat")
-        login_types_set = set(current_login_types.split(",")) if current_login_types else set()
-        
+        current_login_types = getattr(
+            final_user, "available_login_types", ""
+        ) or getattr(final_user, "primary_login_type", "wechat")
+        login_types_set = (
+            set(current_login_types.split(",")) if current_login_types else set()
+        )
+
         if final_user.phone_number:
             login_types_set.add("phone")
         if final_user.wechat_openid:
             login_types_set.add("wechat")
-        if final_user.email and not final_user.email.endswith(("@sms.local", "@wechat.local")):
+        if final_user.email and not final_user.email.endswith(
+            ("@sms.local", "@wechat.local")
+        ):
             login_types_set.add("email")
 
         Users.update_user_by_id(
