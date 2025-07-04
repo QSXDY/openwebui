@@ -1164,8 +1164,8 @@ async def wechat_follow_login(
                 # 如果允许仅微信登录，继续执行登录流程
 
                 # 根据配置决定是否要求强制绑定手机号
-                require_phone_binding = request.app.state.config.get(
-                    "REQUIRE_PHONE_BINDING_FOR_WECHAT", False
+                require_phone_binding = getattr(
+                    request.app.state.config, "REQUIRE_PHONE_BINDING_FOR_WECHAT", False
                 )
 
                 if require_phone_binding:
