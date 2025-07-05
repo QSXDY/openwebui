@@ -689,6 +689,7 @@ class AuthsTable:
         try:
             with get_db() as db:
                 auth = db.query(Auth).filter_by(id=user_id, active=True).first()
+                log.info(f"get_auth_by_id: {auth}")
                 if auth:
                     return AuthModel.model_validate(auth)
                 return None

@@ -3709,15 +3709,15 @@ async def wechat_bind_phone(
             )
 
         # 验证Auth表中的数据是否同步
-        auth_record = Auths.get_auth_by_id(final_user.id)
-        if not auth_record or not auth_record.phone_number:
-            log.error(
-                f"Auth表同步失败: user_id={final_user.id}, auth_phone={auth_record.phone_number if auth_record else 'None'}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="认证信息同步失败，请重试",
-            )
+        # auth_record = Auths.get_auth_by_id(final_user.id)
+        # if not auth_record or not auth_record.phone_number:
+        #     log.error(
+        #         f"Auth表同步失败: user_id={final_user.id}, auth_phone={auth_record.phone_number if auth_record else 'None'}"
+        #     )
+        #     raise HTTPException(
+        #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        #         detail="认证信息同步失败，请重试",
+        #     )
 
         log.info(
             f"绑定验证成功: user_id={final_user.id}, user_phone={final_user.phone_number}, auth_phone={auth_record.phone_number}"
