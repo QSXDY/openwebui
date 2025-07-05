@@ -3719,9 +3719,9 @@ async def wechat_bind_phone(
         #         detail="认证信息同步失败，请重试",
         #     )
 
-        log.info(
-            f"绑定验证成功: user_id={final_user.id}, user_phone={final_user.phone_number}, auth_phone={auth_record.phone_number}"
-        )
+        # log.info(
+        #     f"绑定验证成功: user_id={final_user.id}, user_phone={final_user.phone_number}, auth_phone={auth_record.phone_number}"
+        # )
 
         # 生成JWT令牌
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
