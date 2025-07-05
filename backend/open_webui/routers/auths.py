@@ -399,32 +399,56 @@ class WeChatFollowService:
         if not app_id or not app_secret:
             raise ValueError("微信公众号配置不完整")
 
-        # 使用缓存的access_token
-        access_token = await WeChatFollowService._get_cached_access_token(
-            request, app_id, app_secret
-        )
-
         # 创建带参数二维码（临时二维码，10分钟过期）
-        qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
         qr_data = {
             "expire_seconds": 600,  # 10分钟过期
             "action_name": "QR_STR_SCENE",
             "action_info": {"scene": {"scene_str": scene_id}},
         }
 
-        async with ClientSession() as session:
-            async with session.post(qr_url, json=qr_data) as response:
-                qr_response = await response.json()
-                if "ticket" not in qr_response:
-                    raise ValueError(
-                        f"创建二维码失败: {qr_response.get('errmsg', '未知错误')}"
-                    )
+        # 重试机制：最多重试2次
+        for attempt in range(2):
+            try:
+                # 获取access_token（第一次尝试使用缓存，第二次强制刷新）
+                force_refresh = attempt > 0
+                access_token = await WeChatFollowService._get_cached_access_token(
+                    request, app_id, app_secret, force_refresh=force_refresh
+                )
 
-                return {
-                    "ticket": qr_response["ticket"],
-                    "expire_seconds": qr_response.get("expire_seconds", 600),
-                    "url": qr_response.get("url", ""),
-                }
+                qr_url = f"https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token={access_token}"
+
+                async with ClientSession() as session:
+                    async with session.post(qr_url, json=qr_data) as response:
+                        qr_response = await response.json()
+                        log.info(f"微信二维码创建响应: {qr_response}")
+                        
+                        if "ticket" in qr_response:
+                            return {
+                                "ticket": qr_response["ticket"],
+                                "expire_seconds": qr_response.get("expire_seconds", 600),
+                                "url": qr_response.get("url", ""),
+                            }
+                        else:
+                            error_code = qr_response.get("errcode")
+                            error_msg = qr_response.get("errmsg", "未知错误")
+                            
+                            # 如果是access_token相关错误，尝试刷新
+                            if error_code in [40001, 40014, 41001, 42001] and attempt == 0:
+                                log.warning(f"access_token无效，尝试刷新: {error_msg}")
+                                continue
+                            else:
+                                raise ValueError(f"创建二维码失败: {error_msg} (errcode: {error_code})")
+                                
+            except Exception as e:
+                if attempt == 1:  # 最后一次尝试
+                    log.error(f"创建二维码最终失败: {str(e)}")
+                    raise ValueError(f"创建二维码失败: {str(e)}")
+                else:
+                    log.warning(f"创建二维码尝试 {attempt + 1} 失败，准备重试: {str(e)}")
+                    continue
+
+        # 不应该到达这里
+        raise ValueError("创建二维码失败：重试次数已用完")
 
     @staticmethod
     async def generate_qr_code(request: Request) -> WeChatQRResponse:
@@ -493,73 +517,101 @@ class WeChatFollowService:
                 log.info(f"使用缓存的用户信息: {openid}")
                 return cached_info["data"]
 
-        # 获取或刷新access_token
-        access_token = await WeChatFollowService._get_cached_access_token(
-            request, app_id, app_secret
-        )
+        # 重试机制：最多重试2次
+        for attempt in range(2):
+            try:
+                # 获取或刷新access_token（第一次尝试使用缓存，第二次强制刷新）
+                force_refresh = attempt > 0
+                access_token = await WeChatFollowService._get_cached_access_token(
+                    request, app_id, app_secret, force_refresh=force_refresh
+                )
 
-        # 获取用户信息
-        user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
+                # 获取用户信息
+                user_url = f"https://api.weixin.qq.com/cgi-bin/user/info?access_token={access_token}&openid={openid}&lang=zh_CN"
 
-        async with ClientSession() as session:
-            async with session.get(user_url) as response:
-                user_data = await response.json()
-                if "openid" not in user_data:
-                    raise ValueError(
-                        f"获取用户信息失败: {user_data.get('errmsg', '未知错误')}"
-                    )
+                async with ClientSession() as session:
+                    async with session.get(user_url) as response:
+                        user_data = await response.json()
+                        log.info(f"微信用户信息接口响应: {user_data}")
+                        
+                        if "openid" in user_data:
+                            # 处理空值和默认值
+                            processed_data = {
+                                "subscribe": user_data.get("subscribe", 1),
+                                "openid": user_data.get("openid", openid),
+                                "nickname": user_data.get("nickname", "")
+                                or f"微信用户_{openid[-8:]}",
+                                "sex": user_data.get("sex", 0),
+                                "language": user_data.get("language", "zh_CN"),
+                                "city": user_data.get("city", ""),
+                                "province": user_data.get("province", ""),
+                                "country": user_data.get("country", ""),
+                                "headimgurl": user_data.get("headimgurl", "") or "",
+                                "subscribe_time": user_data.get("subscribe_time", int(time.time())),
+                                "unionid": user_data.get("unionid", ""),
+                                "remark": user_data.get("remark", ""),
+                                "groupid": user_data.get("groupid", 0),
+                                "tagid_list": user_data.get("tagid_list", []),
+                                "subscribe_scene": user_data.get(
+                                    "subscribe_scene", "ADD_SCENE_QR_CODE"
+                                ),
+                                "qr_scene": user_data.get("qr_scene", 0),
+                                "qr_scene_str": user_data.get("qr_scene_str", ""),
+                            }
 
-                # 处理空值和默认值
-                processed_data = {
-                    "subscribe": user_data.get("subscribe", 1),
-                    "openid": user_data.get("openid", openid),
-                    "nickname": user_data.get("nickname", "")
-                    or f"微信用户_{openid[-8:]}",
-                    "sex": user_data.get("sex", 0),
-                    "language": user_data.get("language", "zh_CN"),
-                    "city": user_data.get("city", ""),
-                    "province": user_data.get("province", ""),
-                    "country": user_data.get("country", ""),
-                    "headimgurl": user_data.get("headimgurl", "") or "",
-                    "subscribe_time": user_data.get("subscribe_time", int(time.time())),
-                    "unionid": user_data.get("unionid", ""),
-                    "remark": user_data.get("remark", ""),
-                    "groupid": user_data.get("groupid", 0),
-                    "tagid_list": user_data.get("tagid_list", []),
-                    "subscribe_scene": user_data.get(
-                        "subscribe_scene", "ADD_SCENE_QR_CODE"
-                    ),
-                    "qr_scene": user_data.get("qr_scene", 0),
-                    "qr_scene_str": user_data.get("qr_scene_str", ""),
-                }
+                            # 记录详细的调试信息
+                            log.info(f"原始微信用户信息: {user_data}")
+                            log.info(f"处理后的用户信息: {processed_data}")
 
-                # 记录详细的调试信息
-                log.info(f"原始微信用户信息: {user_data}")
-                log.info(f"处理后的用户信息: {processed_data}")
+                            # 如果昵称和头像都为空，记录警告
+                            if (
+                                not processed_data["nickname"]
+                                or processed_data["nickname"] == f"微信用户_{openid[-8:]}"
+                            ):
+                                log.warning(f"用户 {openid} 的昵称为空，可能是隐私设置限制")
+                            if not processed_data["headimgurl"]:
+                                log.warning(f"用户 {openid} 的头像为空，可能是隐私设置限制")
 
-                # 如果昵称和头像都为空，记录警告
-                if (
-                    not processed_data["nickname"]
-                    or processed_data["nickname"] == f"微信用户_{openid[-8:]}"
-                ):
-                    log.warning(f"用户 {openid} 的昵称为空，可能是隐私设置限制")
-                if not processed_data["headimgurl"]:
-                    log.warning(f"用户 {openid} 的头像为空，可能是隐私设置限制")
+                            # 缓存用户信息（5分钟）
+                            WeChatFollowService._user_info_cache[cache_key] = {
+                                "data": processed_data,
+                                "expires_at": time.time() + 300,  # 5分钟缓存
+                            }
 
-                # 缓存用户信息（5分钟）
-                WeChatFollowService._user_info_cache[cache_key] = {
-                    "data": processed_data,
-                    "expires_at": time.time() + 300,  # 5分钟缓存
-                }
+                            return processed_data
+                        else:
+                            error_code = user_data.get("errcode")
+                            error_msg = user_data.get("errmsg", "未知错误")
+                            
+                            # 如果是access_token相关错误，尝试刷新
+                            if error_code in [40001, 40014, 41001, 42001] and attempt == 0:
+                                log.warning(f"access_token无效，尝试刷新: {error_msg}")
+                                continue
+                            else:
+                                raise ValueError(f"获取用户信息失败: {error_msg} (errcode: {error_code})")
+                                
+            except Exception as e:
+                if attempt == 1:  # 最后一次尝试
+                    log.error(f"获取用户信息最终失败: {str(e)}")
+                    raise ValueError(f"获取用户信息失败: {str(e)}")
+                else:
+                    log.warning(f"获取用户信息尝试 {attempt + 1} 失败，准备重试: {str(e)}")
+                    continue
 
-                return processed_data
+        # 不应该到达这里
+        raise ValueError("获取用户信息失败：重试次数已用完")
 
     @staticmethod
     async def _get_cached_access_token(
-        request: Request, app_id: str, app_secret: str
+        request: Request, app_id: str, app_secret: str, force_refresh: bool = False
     ) -> str:
         """获取缓存的access_token"""
         current_time = time.time()
+
+        # 如果强制刷新，清空缓存
+        if force_refresh:
+            WeChatFollowService._access_token_cache = {"token": None, "expires_at": 0}
+            log.info("强制刷新access_token，清空缓存")
 
         # 检查缓存是否有效（access_token有效期2小时，我们提前5分钟刷新）
         if (
@@ -574,24 +626,36 @@ class WeChatFollowService:
         log.info("获取新的access_token")
         token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
 
-        async with ClientSession() as session:
-            async with session.get(token_url) as response:
-                token_data = await response.json()
-                if "access_token" not in token_data:
-                    raise ValueError(
-                        f"获取access_token失败: {token_data.get('errmsg', '未知错误')}"
-                    )
+        try:
+            async with ClientSession() as session:
+                async with session.get(token_url) as response:
+                    token_data = await response.json()
+                    log.info(f"微信token接口响应: {token_data}")
+                    
+                    if "access_token" not in token_data:
+                        error_msg = token_data.get('errmsg', '未知错误')
+                        error_code = token_data.get('errcode', 'unknown')
+                        log.error(f"获取access_token失败: errcode={error_code}, errmsg={error_msg}")
+                        raise ValueError(
+                            f"获取access_token失败: {error_msg} (errcode: {error_code})"
+                        )
 
-                access_token = token_data["access_token"]
-                expires_in = token_data.get("expires_in", 7200)  # 默认2小时
+                    access_token = token_data["access_token"]
+                    expires_in = token_data.get("expires_in", 7200)  # 默认2小时
 
-                # 更新缓存
-                WeChatFollowService._access_token_cache = {
-                    "token": access_token,
-                    "expires_at": current_time + expires_in,
-                }
+                    # 更新缓存
+                    WeChatFollowService._access_token_cache = {
+                        "token": access_token,
+                        "expires_at": current_time + expires_in,
+                    }
 
-                return access_token
+                    log.info(f"成功获取access_token，有效期: {expires_in}秒")
+                    return access_token
+        except Exception as e:
+            log.error(f"获取access_token异常: {str(e)}")
+            # 清空缓存，避免使用无效的token
+            WeChatFollowService._access_token_cache = {"token": None, "expires_at": 0}
+            raise
 
     @staticmethod
     async def get_access_token(request: Request) -> str:
@@ -609,77 +673,100 @@ class WeChatFollowService:
     @staticmethod
     async def send_text_message(request: Request, openid: str, content: str) -> bool:
         """发送文本消息给微信用户"""
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        if not app_id or not app_secret:
+            log.error("微信公众号配置不完整")
+            return False
+
+        # 替换消息中的变量
+        webui_url = request.app.state.config.WEBUI_URL
+        content = content.replace("{WEBUI_URL}", webui_url)
+
+        # 确保内容是正确的UTF-8字符串
+        if isinstance(content, bytes):
+            content = content.decode("utf-8")
+
+        # 处理可能的Unicode转义序列
         try:
-            access_token = await WeChatFollowService.get_access_token(request)
-            log.info(f"获取access_token成功")
+            # 如果内容包含Unicode转义序列，进行解码
+            if "\\u" in content:
+                content = (
+                    content.encode("utf-8")
+                    .decode("unicode_escape")
+                    .encode("latin1")
+                    .decode("utf-8")
+                )
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            # 如果解码失败，保持原内容
+            pass
 
-            # 替换消息中的变量
-            webui_url = request.app.state.config.WEBUI_URL
-            content = content.replace("{WEBUI_URL}", webui_url)
+        message_data = {
+            "touser": openid,
+            "msgtype": "text",
+            "text": {"content": content},
+        }
 
-            # 确保内容是正确的UTF-8字符串
-            if isinstance(content, bytes):
-                content = content.decode("utf-8")
+        # 记录发送的消息内容以便调试
+        log.info(f"准备发送消息给用户 {openid}，内容: {content}")
 
-            # 处理可能的Unicode转义序列
+        # 重试机制：最多重试2次
+        for attempt in range(2):
             try:
-                # 如果内容包含Unicode转义序列，进行解码
-                if "\\u" in content:
-                    content = (
-                        content.encode("utf-8")
-                        .decode("unicode_escape")
-                        .encode("latin1")
-                        .decode("utf-8")
-                    )
-            except (UnicodeDecodeError, UnicodeEncodeError):
-                # 如果解码失败，保持原内容
-                pass
-
-            send_url = f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={access_token}"
-
-            message_data = {
-                "touser": openid,
-                "msgtype": "text",
-                "text": {"content": content},
-            }
-
-            # 记录发送的消息内容以便调试
-            log.info(f"准备发送消息给用户 {openid}，内容: {content}")
-
-            async with ClientSession() as session:
-                # 手动序列化JSON，确保UTF-8编码且不转义Unicode字符
-                import json
-
-                json_data = json.dumps(
-                    message_data, ensure_ascii=False, separators=(",", ":")
+                # 获取access_token（第一次尝试使用缓存，第二次强制刷新）
+                force_refresh = attempt > 0
+                access_token = await WeChatFollowService._get_cached_access_token(
+                    request, app_id, app_secret, force_refresh=force_refresh
                 )
 
-                async with session.post(
-                    send_url,
-                    data=json_data.encode("utf-8"),
-                    headers={
-                        "Content-Type": "application/json; charset=utf-8",
-                        "Accept": "application/json",
-                    },
-                ) as response:
-                    result = await response.json()
-                    log.info(f"发送响应: {result}")
-                    if result.get("errcode") == 0:
-                        log.info(f"成功发送消息给用户 {openid}")
-                        return True
-                    else:
-                        log.error(f"发送消息失败: {result}")
-                        # 记录更详细的错误信息
-                        error_code = result.get("errcode")
-                        error_msg = result.get("errmsg", "未知错误")
-                        log.error(f"错误代码: {error_code}, 错误信息: {error_msg}")
-                        return False
-        except Exception as e:
-            log.error(f"发送微信消息异常: {str(e)}")
-            import traceback
+                send_url = f"https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={access_token}"
 
-            log.error(f"异常详情: {traceback.format_exc()}")
-            return False
+                async with ClientSession() as session:
+                    # 手动序列化JSON，确保UTF-8编码且不转义Unicode字符
+                    import json
+
+                    json_data = json.dumps(
+                        message_data, ensure_ascii=False, separators=(",", ":")
+                    )
+
+                    async with session.post(
+                        send_url,
+                        data=json_data.encode("utf-8"),
+                        headers={
+                            "Content-Type": "application/json; charset=utf-8",
+                            "Accept": "application/json",
+                        },
+                    ) as response:
+                        result = await response.json()
+                        log.info(f"发送响应: {result}")
+                        
+                        if result.get("errcode") == 0:
+                            log.info(f"成功发送消息给用户 {openid}")
+                            return True
+                        else:
+                            error_code = result.get("errcode")
+                            error_msg = result.get("errmsg", "未知错误")
+                            log.error(f"错误代码: {error_code}, 错误信息: {error_msg}")
+                            
+                            # 如果是access_token相关错误，尝试刷新
+                            if error_code in [40001, 40014, 41001, 42001] and attempt == 0:
+                                log.warning(f"access_token无效，尝试刷新: {error_msg}")
+                                continue
+                            else:
+                                return False
+                                
+            except Exception as e:
+                if attempt == 1:  # 最后一次尝试
+                    log.error(f"发送微信消息最终失败: {str(e)}")
+                    import traceback
+                    log.error(f"异常详情: {traceback.format_exc()}")
+                    return False
+                else:
+                    log.warning(f"发送微信消息尝试 {attempt + 1} 失败，准备重试: {str(e)}")
+                    continue
+
+        return False
 
     @staticmethod
     async def send_welcome_message(request: Request, openid: str) -> bool:
@@ -1662,10 +1749,34 @@ async def debug_wechat_config(request: Request):
             # 添加消息推送配置信息
             "WECHAT_WELCOME_ENABLED": request.app.state.config.WECHAT_WELCOME_ENABLED,
             "WECHAT_AUTO_REPLY_ENABLED": request.app.state.config.WECHAT_AUTO_REPLY_ENABLED,
+            # 添加缓存状态信息
+            "access_token_cache": {
+                "has_token": bool(WeChatFollowService._access_token_cache["token"]),
+                "expires_at": WeChatFollowService._access_token_cache["expires_at"],
+                "is_expired": time.time() > WeChatFollowService._access_token_cache["expires_at"] if WeChatFollowService._access_token_cache["expires_at"] > 0 else True,
+            },
+            "user_info_cache_count": len(WeChatFollowService._user_info_cache),
         }
         return {"status": "success", "config": config}
     except Exception as e:
         log.error(f"获取微信调试配置失败: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/wechat/debug/clear-cache")
+async def clear_wechat_cache(request: Request, user=Depends(get_admin_user)):
+    """清除微信缓存（仅管理员）"""
+    try:
+        # 清除access_token缓存
+        WeChatFollowService._access_token_cache = {"token": None, "expires_at": 0}
+        
+        # 清除用户信息缓存
+        WeChatFollowService._user_info_cache.clear()
+        
+        log.info("微信缓存已清除")
+        return {"status": "success", "message": "微信缓存已清除"}
+    except Exception as e:
+        log.error(f"清除微信缓存失败: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 
@@ -3529,6 +3640,8 @@ async def wechat_bind_phone(
             user_id=wechat_user.id,
             login_type="phone",
             phone_number=phone_number,
+            wechat_openid=openid,
+            wechat_nickname=user_info.get("nickname", ""),
         )
 
         if not auth_update_success:
