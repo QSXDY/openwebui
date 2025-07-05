@@ -180,12 +180,12 @@ async def get_group_admin_credit(user=Depends(get_verified_user)):
                     "admin_id": group.admin_id,
                     "admin_name": (
                         Users.get_user_by_id(group.admin_id).name
-                        if group.admin_id
+                        if group.admin_id and Users.get_user_by_id(group.admin_id)
                         else None
                     ),
                     "admin_credit": (
                         Credits.get_credit_by_user_id(group.admin_id).credit
-                        if group.admin_id
+                        if group.admin_id and Credits.get_credit_by_user_id(group.admin_id)
                         else 0
                     ),
                 }
