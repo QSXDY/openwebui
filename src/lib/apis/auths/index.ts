@@ -1005,11 +1005,11 @@ export const bindPhoneNumber = async (
 	return res;
 };
 
-// 绑定微信
+// 手机号注册绑定微信
 export const bindWeChat = async (openid: string, scene_id: string, token: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/bind/wechat`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/register/wechat`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
