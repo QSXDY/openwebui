@@ -97,7 +97,11 @@
 				localStorage.token = sessionUser.token;
 			}
 			$socket.emit('user-join', { auth: { token: sessionUser.token } });
-			await user.set(sessionUser);
+			const sessionUser1 = await getSessionUser(localStorage.token).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+			await user.set(sessionUser1);
 			await config.set(await getBackendConfig());
 
 			// 如果不需要绑定手机号，直接跳转
@@ -112,7 +116,11 @@
 			localStorage.token = tokenUser.token;
 		}
 		$socket.emit('user-join', { auth: { token: tokenUser.token } });
-		await user.set(tokenUser);
+		const sessionUser1 = await getSessionUser(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		await user.set(sessionUser1);
 		await config.set(await getBackendConfig());
 		const redirectPath = querystringValue('redirect') || '/';
 		goto(redirectPath);
