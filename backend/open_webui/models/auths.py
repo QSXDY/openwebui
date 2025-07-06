@@ -471,7 +471,7 @@ class AuthsTable:
             with get_db() as db:
                 auth = (
                     db.query(Auth)
-                    .filter_by(wechat_openid=wechat_openid, active=True)
+                    .filter_by(wechat_openid=wechat_openid)
                     .first()
                 )
                 if auth:
