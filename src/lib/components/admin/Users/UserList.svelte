@@ -310,12 +310,11 @@
 					<th
 						scope="col"
 						class="px-3 py-1.5 cursor-pointer select-none"
-						on:click={() => setSortKey('email')}
+						on:click={() => setSortKey('phone_number')}
 					>
 						<div class="flex gap-1.5 items-center">
-							{$i18n.t('Email')}
-
-							{#if orderBy === 'email'}
+							手机号
+							<!-- {#if orderBy === 'phone_number'}
 								<span class="font-normal"
 									>{#if direction === 'asc'}
 										<ChevronUp className="size-2" />
@@ -327,10 +326,31 @@
 								<span class="invisible">
 									<ChevronUp className="size-2" />
 								</span>
-							{/if}
+							{/if} -->
 						</div>
 					</th>
-
+					<th
+						scope="col"
+						class="px-3 py-1.5 cursor-pointer select-none"
+						on:click={() => setSortKey('wechat_openid')}
+					>
+						<div class="flex gap-1.5 items-center">
+							微信
+							<!-- {#if orderBy === 'wechat_openid'}
+								<span class="font-normal"
+									>{#if direction === 'asc'}
+										<ChevronUp className="size-2" />
+									{:else}
+										<ChevronDown className="size-2" />
+									{/if}
+								</span>
+							{:else}
+								<span class="invisible">
+									<ChevronUp className="size-2" />
+								</span>
+							{/if} -->
+						</div>
+					</th>
 					<th
 						scope="col"
 						class="px-3 py-1.5 cursor-pointer select-none"
@@ -460,8 +480,8 @@
 								<div class=" font-medium self-center">{user.name}</div>
 							</div>
 						</td>
-						<td class=" px-3 py-1"> {user.email} </td>
-
+						<td class=" px-3 py-1"> {user.phone_number} </td>
+						<td class=" px-3 py-1"> {user.wechat_openid ? '已绑定' : '未绑定'} </td>
 						<td class=" px-3 py-1"> {user.credit} </td>
 
 						<td class=" px-3 py-1">

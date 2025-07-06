@@ -227,23 +227,40 @@
 
 <div class="flex flex-col h-full justify-between text-sm">
 	<div class=" space-y-3 lg:max-h-full">
-		{#if adcredit !== null}
-			<!-- 使用Svelte规范的{#if}语法，全等判断 -->
-			<div class="pt-0.5">
-				<div class="flex flex-col w-full">
-					<div class=" mb-1 text-xs font-medium">所属企业</div>
-
-					<div class="flex-1 flex items-center">
-						{tradeInfouse.group_name}
-						<div
-							class="text-xs ml-2 flex items-center font-bold h-[20px] bg-green-500/20 text-green-700 dark:text-green-200 w-fit px-2 rounded-sm uppercase line-clamp-1 mr-0.5"
-						>
-							{$user.id === tradeInfouse.admin_id ? '企业管理员' : '企业成员'}
-						</div>
-					</div>
+		<div class="pt-0.5">
+			<div class="flex flex-col w-full">
+				<div class=" mb-1 font-medium flex">
+					<div>所属企业</div>
+					<button class="ml-1" on:click={doInitadd}>
+						<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+							<path
+								d="M832 512a32 32 0 0 0-32 32c0 158.784-129.216 288-288 288s-288-129.216-288-288 129.216-288 288-288c66.208 0 129.536 22.752 180.608 64H608a32 32 0 0 0 0 64h160a32 32 0 0 0 32-32V192a32 32 0 0 0-64 0v80.96A350.464 350.464 0 0 0 512 192C317.92 192 160 349.92 160 544s157.92 352 352 352 352-157.92 352-352a32 32 0 0 0-32-32"
+								fill="#3E3A39"
+							></path>
+						</svg>
+					</button>
 				</div>
+				{#if tradeInfouse.groups && tradeInfouse.groups.length > 0}
+					{#each tradeInfouse.groups as group}
+						<div class="flex-1 my-1 text-xs flex items-center">
+							<div class="flex-1 flex items-center">
+								{group.name}
+								<div
+									class="text-xs ml-2 flex items-center font-bold h-[20px] bg-green-500/20 text-green-700 dark:text-green-200 w-fit px-2 rounded-sm uppercase line-clamp-1 mr-0.5"
+								>
+									{$user.id === group.admin_id ? '企业管理员' : '企业成员'}
+								</div>
+							</div>
+							<div>
+								企业{$i18n.t('Credit')}： {group.admin_credit == '0E-12' ? 0 : group.admin_credit}
+							</div>
+						</div>
+					{/each}
+				{:else}
+					<p>暂无企业</p>
+				{/if}
 			</div>
-		{/if}
+		</div>
 		<div class="space-y-1">
 			<div class="flex">
 				<div class="pt-0.5 mr-5">
@@ -267,33 +284,6 @@
 						</div>
 					</div>
 				</div>
-				{#if adcredit !== null}
-					<!-- 使用Svelte规范的{#if}语法，全等判断 -->
-					<div class="pt-0.5">
-						<div class="flex flex-col w-full">
-							<div class="mb-1 flex items-center text-base font-medium">
-								企业{$i18n.t('Credit')}
-								<!-- 保留原有i18n翻译 -->
-							</div>
-							<div class="flex items-center">
-								<div>{adcredit == '0E-12' ? 0 : adcredit}</div>
-								<button class="ml-1" on:click={doInitadd}>
-									<svg
-										viewBox="0 0 1024 1024"
-										xmlns="http://www.w3.org/2000/svg"
-										width="16"
-										height="16"
-									>
-										<path
-											d="M832 512a32 32 0 0 0-32 32c0 158.784-129.216 288-288 288s-288-129.216-288-288 129.216-288 288-288c66.208 0 129.536 22.752 180.608 64H608a32 32 0 0 0 0 64h160a32 32 0 0 0 32-32V192a32 32 0 0 0-64 0v80.96A350.464 350.464 0 0 0 512 192C317.92 192 160 349.92 160 544s157.92 352 352 352 352-157.92 352-352a32 32 0 0 0-32-32"
-											fill="#3E3A39"
-										></path>
-									</svg>
-								</button>
-							</div>
-						</div>
-					</div>
-				{/if}
 			</div>
 			<div class="max-h-[14rem] flex flex-col items-center w-full">
 				<div id="trade-qrcode" class="max-h-[128px] max-w-[128px]"></div>

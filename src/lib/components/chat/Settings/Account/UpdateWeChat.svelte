@@ -30,12 +30,12 @@
 		getWeChatQR();
 	};
 	$: if (show === true) {
-		getWeChatQR();
+		// getWeChatQR();
 	}
 
 	// 当切换到其他登录方式时停止微信轮询
 	$: if (show !== true) {
-		stopWeChatPolling();
+		// stopWeChatPolling();
 	}
 	function isWeChatBrowser() {
 		const userAgent = navigator.userAgent || navigator.vendor || window.opera;
@@ -137,18 +137,14 @@
 >
 	<div class="flex justify-between items-center text-sm">
 		<div class="  font-medium">微信绑定</div>
-		<button
-			class=" text-xs font-medium text-gray-500"
-			type="button"
+		<button class=" text-xs font-medium text-gray-500" type="button"
 			>{$user.wechat_openid == null ? '未绑定' : '已绑定'}</button
 		>
 	</div>
-		<hr class="border-gray-50 dark:border-gray-850 my-2" />
-<div class="flex justify-between items-center text-sm">
+	<hr class="border-gray-50 dark:border-gray-850 my-2" />
+	<div class="flex justify-between items-center text-sm">
 		<div class="  font-medium">手机号绑定</div>
-		<button
-			class=" text-xs font-medium text-gray-500"
-			type="button"
+		<button class=" text-xs font-medium text-gray-500" type="button"
 			>{$user.phone_number == null ? '未绑定' : $user.phone_number}</button
 		>
 	</div>

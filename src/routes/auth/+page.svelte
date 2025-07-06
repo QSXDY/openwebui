@@ -76,7 +76,7 @@
 			console.log('检查是否需要绑定手机号', sessionUser);
 			// 检查是否需要绑定手机号
 			if (login === 'wechat') {
-				if (sessionUser.phone_number == null) {
+				if (sessionUser.user.phone_number == null) {
 					needBindPhone = true;
 					showBindPhoneModal = true;
 					return toast.info('登录成功，请绑定手机号以完善账户信息');
@@ -107,7 +107,16 @@
 			}
 		}
 	};
-
+	const SessionUser1 = async () => {
+		if (tokenUser.token) {
+			localStorage.token = tokenUser.token;
+		}
+		$socket.emit('user-join', { auth: { token: tokenUser.token } });
+		await user.set(tokenUser);
+		await config.set(await getBackendConfig());
+		const redirectPath = querystringValue('redirect') || '/';
+		goto(redirectPath);
+	};
 	const signInHandler = async () => {
 		const sessionUser = await userSignIn(email, password).catch((error) => {
 			toast.error(`${error}`);
@@ -268,7 +277,7 @@
 				const phoneStatus = await checkPhoneExists(phone);
 				if (phoneStatus.exists) {
 					if (codeType === 'register') {
-						const message = phoneStatus.details.registered_as_primary 
+						const message = phoneStatus.details.registered_as_primary
 							? '该手机号已注册，请使用登录功能'
 							: '该手机号已被其他账号绑定，请使用其他手机号';
 						toast.error(message);
@@ -429,7 +438,7 @@
 					// 处理关注成功，进行登录
 					try {
 						const sessionUser = await weChatFollowLogin(response.openid, wechatSceneId);
-						
+
 						// 检查登录结果
 						if (sessionUser.success === false && sessionUser.need_phone_binding) {
 							// 需要绑定手机号
@@ -551,16 +560,11 @@
 
 		try {
 			let sessionUser;
-			
+
 			// 检查是否是微信用户绑定手机号
 			if (tokenUser.openid && tokenUser.scene_id) {
 				// 调用微信用户绑定手机号接口
-				sessionUser = await weChatBindPhone(
-					tokenUser.openid,
-					tokenUser.scene_id,
-					phone,
-					phonecode
-				);
+				sessionUser = await weChatBindPhone(tokenUser.openid, tokenUser.scene_id, phone, phonecode);
 			} else {
 				// 普通用户绑定手机号
 				await bindPhoneNumber(phone, phonecode, tokenUser.token);
@@ -568,8 +572,7 @@
 				showBindPhoneModal = false;
 				needBindPhone = false;
 				// 绑定成功后跳转
-				const redirectPath = querystringValue('redirect') || '/';
-				goto(redirectPath);
+				await SessionUser1();
 				return;
 			}
 
@@ -692,17 +695,19 @@
 										>{$i18n.t('Wechat login')}</button
 									>
 								{/if}
-								<button
-									on:click={() => (login = 'email')}
-									class="min-w-fit rounded-full p-1.5 pb-0 {login == 'email'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								>
-									{mode === 'signin' ? $i18n.t('Email login') : '邮箱注册'}
-								</button>
+								{#if mode === 'signin1'}
+									<button
+										on:click={() => (login = 'email')}
+										class="min-w-fit rounded-full p-1.5 pb-0 {login == 'email'
+											? ''
+											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+									>
+										{mode === 'signin1' ? $i18n.t('Email login') : '邮箱注册'}
+									</button>
+								{/if}
 								<button
 									on:click={() => (login = 'phone')}
-									class="min-w-fit rounded-full p-1.5 pb-0 {login == 'phone'
+									class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'phone'
 										? ''
 										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
 									>{mode === 'signin' ? $i18n.t('Phone login') : '手机号注册'}</button
@@ -970,7 +975,7 @@
 													on:click={() => {
 														if (mode === 'signin') {
 															mode = 'signup';
-															login = 'email';
+															login = 'phone';
 														} else {
 															mode = 'signin';
 														}

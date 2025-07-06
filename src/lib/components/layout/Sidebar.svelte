@@ -987,11 +987,11 @@
 							<div class=" self-center mr-3">
 								<img
 									src={$user?.profile_image_url}
-									class=" max-w-[30px] object-cover rounded-full"
+									class="w-[30px] h-[30px] object-cover rounded-full"
 									alt="User profile"
 								/>
 							</div>
-							<div class=" self-center font-medium">{$user?.name}</div>
+							<div class="truncate self-center font-medium">{$user?.name}</div>
 						</button>
 					</UserMenu>
 				{/if}
