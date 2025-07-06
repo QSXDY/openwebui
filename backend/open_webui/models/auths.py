@@ -394,51 +394,6 @@ class AuthsTable:
         except Exception:
             return None
 
-    def update_auth_binding_info(self, user_id: str, login_type: str, **kwargs) -> bool:
-        """更新认证绑定信息"""
-        try:
-            with get_db() as db:
-                update_data = {}
-                user_update_params = {}
-
-                if login_type == "phone" and "phone_number" in kwargs:
-                    update_data["phone_number"] = kwargs["phone_number"]
-                    user_update_params["phone_number"] = kwargs["phone_number"]
-
-                elif login_type == "wechat":
-                    if "wechat_openid" in kwargs:
-                        update_data["wechat_openid"] = kwargs["wechat_openid"]
-                        user_update_params["wechat_openid"] = kwargs["wechat_openid"]
-                    if "wechat_unionid" in kwargs:
-                        update_data["wechat_unionid"] = kwargs["wechat_unionid"]
-                    if "auth_metadata" in kwargs:
-                        update_data["auth_metadata"] = kwargs["auth_metadata"]
-                        # 从 metadata 中提取微信昵称
-                        if (
-                            isinstance(kwargs["auth_metadata"], dict)
-                            and "nickname" in kwargs["auth_metadata"]
-                        ):
-                            user_update_params["wechat_nickname"] = kwargs[
-                                "auth_metadata"
-                            ]["nickname"]
-
-                if update_data:
-                    # 更新 Auth 表
-                    result = db.query(Auth).filter_by(id=user_id).update(update_data)
-                    db.commit()
-
-                    # 同步更新 User 表中的绑定信息
-                    if user_update_params:
-                        Users.update_user_binding_info(
-                            user_id=user_id, login_type=login_type, **user_update_params
-                        )
-
-                    return result == 1
-                return False
-        except Exception as e:
-            print(f"更新认证绑定信息失败: {str(e)}")
-            return False
-
     def get_auth_by_id(self, user_id: str) -> Optional[AuthModel]:
         """根据用户ID获取认证信息"""
         try:
@@ -471,7 +426,7 @@ class AuthsTable:
             with get_db() as db:
                 auth = (
                     db.query(Auth)
-                    .filter_by(wechat_openid=wechat_openid)
+                    .filter_by(wechat_openid=wechat_openid, active=True)
                     .first()
                 )
                 if auth:
@@ -480,74 +435,355 @@ class AuthsTable:
         except Exception:
             return None
 
-    def check_binding_availability(self, login_type: str, login_value: str) -> bool:
-        """检查绑定信息是否可用（未被其他用户使用）"""
+    # ==== 重构后的核心绑定逻辑 ====
+
+    def find_existing_user(
+        self, phone_number: Optional[str] = None, wechat_openid: Optional[str] = None
+    ) -> Optional[UserModel]:
+        """
+        查找现有用户 - 统一的账号查找逻辑
+        优先级：手机号 > 微信号
+        返回第一个找到的用户，确保不会有重复用户
+        """
         try:
-            with get_db() as db:
-                if login_type == "phone":
-                    existing = (
-                        db.query(Auth)
-                        .filter_by(phone_number=login_value, active=True)
-                        .first()
-                    )
-                elif login_type == "wechat":
-                    existing = (
-                        db.query(Auth)
-                        .filter_by(wechat_openid=login_value, active=True)
-                        .first()
-                    )
-                else:
-                    return False
-
-                return existing is None
-        except Exception:
-            return False
-
-    def try_merge_accounts(
-        self,
-        phone_number: str,
-        wechat_openid: str,
-        wechat_nickname: Optional[str] = None,
-        auth_metadata: Optional[dict] = None,
-    ) -> dict:
-        """尝试合并账号：当微信已被绑定但该账号没有手机号时，将手机号绑定到该账号"""
-        try:
-            with get_db() as db:
-                # 检查微信是否已被绑定
-                wechat_auth = self.get_auth_by_wechat_openid(wechat_openid)
-                if not wechat_auth:
-                    return {"can_merge": False, "reason": "微信未被绑定"}
-
-                # 检查手机号是否已被绑定
+            # 先通过手机号查找
+            if phone_number:
+                # 从Auth表查找
                 phone_auth = self.get_auth_by_phone_number(phone_number)
                 if phone_auth:
-                    return {"can_merge": False, "reason": "手机号已被其他用户绑定"}
+                    user = Users.get_user_by_id(phone_auth.id)
+                    if user:
+                        return user
 
-                # 检查微信绑定的账号是否已有手机号
-                if wechat_auth.phone_number:
-                    return {"can_merge": False, "reason": "微信绑定的账号已有手机号"}
+                # 从User表查找（兜底）
+                user = Users.get_user_by_phone_number(phone_number)
+                if user:
+                    return user
 
-                # 可以合并：将手机号绑定到微信账号
-                update_success = self.update_auth_binding_info(
-                    user_id=wechat_auth.id,
-                    login_type="phone",
-                    phone_number=phone_number,
+            # 再通过微信号查找
+            if wechat_openid:
+                # 从Auth表查找
+                wechat_auth = self.get_auth_by_wechat_openid(wechat_openid)
+                if wechat_auth:
+                    user = Users.get_user_by_id(wechat_auth.id)
+                    if user:
+                        return user
+
+                # 从User表查找（兜底）
+                user = Users.get_user_by_wechat_openid(wechat_openid)
+                if user:
+                    return user
+
+            return None
+        except Exception as e:
+            log.error(f"查找现有用户失败: {str(e)}")
+            return None
+
+    def bind_login_methods_to_user(
+        self,
+        user_id: str,
+        phone_number: Optional[str] = None,
+        wechat_openid: Optional[str] = None,
+        wechat_unionid: Optional[str] = None,
+        wechat_nickname: Optional[str] = None,
+        auth_metadata: Optional[dict] = None,
+    ) -> bool:
+        """
+        将登录方式绑定到现有用户
+        确保Auth表和User表数据同步
+        """
+        try:
+            with get_db() as db:
+                # 更新Auth表
+                update_data = {}
+                if phone_number:
+                    update_data["phone_number"] = phone_number
+                if wechat_openid:
+                    update_data["wechat_openid"] = wechat_openid
+                if wechat_unionid:
+                    update_data["wechat_unionid"] = wechat_unionid
+                if auth_metadata:
+                    update_data["auth_metadata"] = auth_metadata
+
+                if update_data:
+                    result = db.query(Auth).filter_by(id=user_id).update(update_data)
+                    db.commit()
+
+                    if result != 1:
+                        log.error(f"更新Auth表失败: user_id={user_id}")
+                        return False
+
+                # 更新User表
+                user_update_data = {}
+                if phone_number:
+                    user_update_data["phone_number"] = phone_number
+                if wechat_openid:
+                    user_update_data["wechat_openid"] = wechat_openid
+                if wechat_nickname:
+                    user_update_data["wechat_nickname"] = wechat_nickname
+
+                # 更新可用登录方式
+                user = Users.get_user_by_id(user_id)
+                if user:
+                    current_types = set(
+                        (
+                            user.available_login_types or user.primary_login_type or ""
+                        ).split(",")
+                    )
+                    current_types.discard("")  # 移除空字符串
+
+                    if phone_number:
+                        current_types.add("phone")
+                    if wechat_openid:
+                        current_types.add("wechat")
+                    if user.email and not user.email.endswith(
+                        ("@sms.local", "@wechat.local")
+                    ):
+                        current_types.add("email")
+
+                    user_update_data["available_login_types"] = ",".join(
+                        sorted(current_types)
+                    )
+
+                    # 更新绑定状态
+                    binding_status = user.binding_status or {}
+                    if phone_number:
+                        binding_status["phone"] = "active"
+                    if wechat_openid:
+                        binding_status["wechat"] = "active"
+                    user_update_data["binding_status"] = binding_status
+
+                if user_update_data:
+                    success = Users.update_user_by_id(user_id, user_update_data)
+                    if not success:
+                        log.error(f"更新User表失败: user_id={user_id}")
+                        return False
+
+                log.info(
+                    f"成功绑定登录方式到用户: user_id={user_id}, phone={bool(phone_number)}, wechat={bool(wechat_openid)}"
                 )
-
-                if update_success:
-                    # 获取合并后的用户信息
-                    merged_user = Users.get_user_by_id(wechat_auth.id)
-                    return {
-                        "can_merge": True,
-                        "merged": True,
-                        "user": merged_user,
-                        "message": "账号合并成功：手机号已绑定到微信账号",
-                    }
-                else:
-                    return {"can_merge": True, "merged": False, "reason": "绑定失败"}
+                return True
 
         except Exception as e:
-            return {"can_merge": False, "reason": f"合并账号时出错: {str(e)}"}
+            log.error(f"绑定登录方式失败: {str(e)}")
+            return False
+
+    def validate_binding_constraints(
+        self,
+        phone_number: Optional[str] = None,
+        wechat_openid: Optional[str] = None,
+        exclude_user_id: Optional[str] = None,
+    ) -> dict:
+        """
+        验证绑定约束条件
+        确保手机号和微信号的唯一性
+        """
+        errors = []
+        conflicts = {}
+
+        try:
+            # 检查手机号冲突
+            if phone_number:
+                phone_auth = self.get_auth_by_phone_number(phone_number)
+                if phone_auth and phone_auth.id != exclude_user_id:
+                    errors.append(f"手机号 {phone_number} 已被其他用户使用")
+                    conflicts["phone"] = phone_auth.id
+
+                # 同时检查User表
+                phone_user = Users.get_user_by_phone_number(phone_number)
+                if phone_user and phone_user.id != exclude_user_id:
+                    if "phone" not in conflicts:
+                        errors.append(f"手机号 {phone_number} 已被其他用户使用")
+                        conflicts["phone"] = phone_user.id
+
+            # 检查微信号冲突
+            if wechat_openid:
+                wechat_auth = self.get_auth_by_wechat_openid(wechat_openid)
+                if wechat_auth and wechat_auth.id != exclude_user_id:
+                    errors.append(f"微信账号已被其他用户使用")
+                    conflicts["wechat"] = wechat_auth.id
+
+                # 同时检查User表
+                wechat_user = Users.get_user_by_wechat_openid(wechat_openid)
+                if wechat_user and wechat_user.id != exclude_user_id:
+                    if "wechat" not in conflicts:
+                        errors.append(f"微信账号已被其他用户使用")
+                        conflicts["wechat"] = wechat_user.id
+
+            return {"valid": len(errors) == 0, "errors": errors, "conflicts": conflicts}
+
+        except Exception as e:
+            return {
+                "valid": False,
+                "errors": [f"验证过程出错: {str(e)}"],
+                "conflicts": {},
+            }
+
+    def create_or_merge_user_account(
+        self,
+        phone_number: Optional[str] = None,
+        wechat_openid: Optional[str] = None,
+        wechat_unionid: Optional[str] = None,
+        wechat_nickname: Optional[str] = None,
+        auth_metadata: Optional[dict] = None,
+        user_name: Optional[str] = None,
+        password: Optional[str] = None,
+        role: str = "user",
+    ) -> dict:
+        """
+        统一的用户账号创建或合并逻辑
+        """
+        try:
+            # 1. 验证绑定约束
+            validation = self.validate_binding_constraints(
+                phone_number=phone_number, wechat_openid=wechat_openid
+            )
+
+            if not validation["valid"]:
+                return {
+                    "success": False,
+                    "action": "validation_failed",
+                    "user": None,
+                    "message": "; ".join(validation["errors"]),
+                    "conflicts": validation["conflicts"],
+                }
+
+            # 2. 查找现有用户
+            existing_user = self.find_existing_user(
+                phone_number=phone_number, wechat_openid=wechat_openid
+            )
+
+            if existing_user:
+                # 3. 合并到现有用户
+                success = self.bind_login_methods_to_user(
+                    user_id=existing_user.id,
+                    phone_number=phone_number,
+                    wechat_openid=wechat_openid,
+                    wechat_unionid=wechat_unionid,
+                    wechat_nickname=wechat_nickname,
+                    auth_metadata=auth_metadata,
+                )
+
+                if success:
+                    # 如果提供了密码，更新密码
+                    if password:
+                        self.update_user_password_by_id(existing_user.id, password)
+
+                    # 如果提供了用户名，更新用户名
+                    if user_name:
+                        Users.update_user_by_id(existing_user.id, {"name": user_name})
+
+                    # 重新获取更新后的用户信息
+                    updated_user = Users.get_user_by_id(existing_user.id)
+                    return {
+                        "success": True,
+                        "action": "merged_to_existing",
+                        "user": updated_user,
+                        "message": "已绑定到现有账号",
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "action": "merge_failed",
+                        "user": None,
+                        "message": "绑定到现有账号失败",
+                    }
+            else:
+                # 4. 创建新用户
+
+                # 确定主要登录方式
+                primary_login_type = "phone" if phone_number else "wechat"
+
+                # 准备用户信息
+                final_name = (
+                    user_name
+                    or wechat_nickname
+                    or f"用户_{phone_number[-4:] if phone_number else wechat_openid[-8:]}"
+                )
+                final_password = password or str(
+                    uuid.uuid4()
+                )  # 如果没有密码则生成随机密码
+
+                # 设置头像
+                profile_image_url = "/user.png"
+                if auth_metadata and auth_metadata.get("headimgurl"):
+                    profile_image_url = auth_metadata["headimgurl"]
+                elif wechat_openid:
+                    import hashlib
+
+                    avatar_hash = hashlib.md5(wechat_openid.encode()).hexdigest()
+                    profile_image_url = f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
+
+                new_user = self.insert_new_auth(
+                    email=None,
+                    password=final_password,
+                    name=final_name,
+                    profile_image_url=profile_image_url,
+                    role=role,
+                    login_type=primary_login_type,
+                    phone_number=phone_number,
+                    wechat_openid=wechat_openid,
+                    wechat_unionid=wechat_unionid,
+                    auth_metadata=auth_metadata,
+                )
+
+                if new_user:
+                    # 确保绑定信息正确
+                    self.bind_login_methods_to_user(
+                        user_id=new_user.id,
+                        phone_number=phone_number,
+                        wechat_openid=wechat_openid,
+                        wechat_unionid=wechat_unionid,
+                        wechat_nickname=wechat_nickname,
+                        auth_metadata=auth_metadata,
+                    )
+
+                    # 重新获取用户信息确保数据一致
+                    final_user = Users.get_user_by_id(new_user.id)
+                    return {
+                        "success": True,
+                        "action": "created_new",
+                        "user": final_user,
+                        "message": "新账号创建成功",
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "action": "create_failed",
+                        "user": None,
+                        "message": "创建新账号失败",
+                    }
+
+        except Exception as e:
+            log.error(f"创建或合并用户账号失败: {str(e)}")
+            return {
+                "success": False,
+                "action": "error",
+                "user": None,
+                "message": f"处理失败: {str(e)}",
+            }
+
+    # ==== 保持兼容性的旧方法（标记为废弃） ====
+
+    def update_auth_binding_info(self, user_id: str, login_type: str, **kwargs) -> bool:
+        """更新认证绑定信息（兼容性方法，建议使用 bind_login_methods_to_user）"""
+        try:
+            return self.bind_login_methods_to_user(
+                user_id=user_id,
+                phone_number=kwargs.get("phone_number"),
+                wechat_openid=kwargs.get("wechat_openid"),
+                wechat_unionid=kwargs.get("wechat_unionid"),
+                wechat_nickname=kwargs.get("wechat_nickname")
+                or (
+                    kwargs.get("auth_metadata", {}).get("nickname")
+                    if kwargs.get("auth_metadata")
+                    else None
+                ),
+                auth_metadata=kwargs.get("auth_metadata"),
+            )
+        except Exception as e:
+            log.error(f"更新认证绑定信息失败: {str(e)}")
+            return False
 
     def check_and_merge_wechat_phone_binding(
         self,
@@ -556,124 +792,44 @@ class AuthsTable:
         wechat_nickname: Optional[str] = None,
         auth_metadata: Optional[dict] = None,
     ) -> dict:
-        """检查并处理微信和手机号的绑定关系"""
+        """
+        检查并处理微信和手机号的绑定关系（兼容性方法）
+        建议使用 create_or_merge_user_account
+        """
         try:
-            # 检查手机号是否已被绑定
-            phone_auth = self.get_auth_by_phone_number(phone_number)
+            result = self.create_or_merge_user_account(
+                phone_number=phone_number,
+                wechat_openid=wechat_openid,
+                wechat_nickname=wechat_nickname,
+                auth_metadata=auth_metadata,
+            )
 
-            # 检查微信是否已被绑定
-            wechat_auth = self.get_auth_by_wechat_openid(wechat_openid)
-
-            # 情况1：都没被绑定，可以创建新账号
-            if not phone_auth and not wechat_auth:
+            # 转换为旧格式的返回值
+            if result["success"]:
+                if result["action"] == "created_new":
+                    return {
+                        "action": "create_new",
+                        "can_proceed": True,
+                        "merged": False,
+                        "user": result["user"],
+                        "message": result["message"],
+                    }
+                elif result["action"] == "merged_to_existing":
+                    return {
+                        "action": "merge_to_existing",
+                        "can_proceed": True,
+                        "merged": True,
+                        "user": result["user"],
+                        "message": result["message"],
+                    }
+            else:
                 return {
-                    "action": "create_new",
-                    "can_proceed": True,
+                    "action": "conflict",
+                    "can_proceed": False,
                     "merged": False,
                     "user": None,
-                    "message": "可以创建新账号",
+                    "message": result["message"],
                 }
-
-            # 情况2：手机号已被绑定，微信未被绑定
-            if phone_auth and not wechat_auth:
-                # 检查手机号绑定的账号是否已有微信
-                if phone_auth.wechat_openid:
-                    return {
-                        "action": "conflict",
-                        "can_proceed": False,
-                        "merged": False,
-                        "user": None,
-                        "message": "手机号已被绑定且该账号已有微信",
-                    }
-                else:
-                    # 可以将微信绑定到手机号账号
-                    update_success = self.update_auth_binding_info(
-                        user_id=phone_auth.id,
-                        login_type="wechat",
-                        wechat_openid=wechat_openid,
-                        auth_metadata=auth_metadata,
-                    )
-                    if update_success:
-                        merged_user = Users.get_user_by_id(phone_auth.id)
-                        return {
-                            "action": "merge_to_phone",
-                            "can_proceed": True,
-                            "merged": True,
-                            "user": merged_user,
-                            "message": "微信已绑定到手机号账号",
-                        }
-                    else:
-                        return {
-                            "action": "merge_to_phone",
-                            "can_proceed": False,
-                            "merged": False,
-                            "user": None,
-                            "message": "绑定微信到手机号账号失败",
-                        }
-
-            # 情况3：微信已被绑定，手机号未被绑定
-            if wechat_auth and not phone_auth:
-                # 检查微信绑定的账号是否已有手机号
-                if wechat_auth.phone_number:
-                    return {
-                        "action": "conflict",
-                        "can_proceed": False,
-                        "merged": False,
-                        "user": None,
-                        "message": "微信已被绑定且该账号已有手机号",
-                    }
-                else:
-                    # 可以将手机号绑定到微信账号
-                    update_success = self.update_auth_binding_info(
-                        user_id=wechat_auth.id,
-                        login_type="phone",
-                        phone_number=phone_number,
-                    )
-                    if update_success:
-                        merged_user = Users.get_user_by_id(wechat_auth.id)
-                        return {
-                            "action": "merge_to_wechat",
-                            "can_proceed": True,
-                            "merged": True,
-                            "user": merged_user,
-                            "message": "手机号已绑定到微信账号",
-                        }
-                    else:
-                        return {
-                            "action": "merge_to_wechat",
-                            "can_proceed": False,
-                            "merged": False,
-                            "user": None,
-                            "message": "绑定手机号到微信账号失败",
-                        }
-
-            # 情况4：都已被绑定
-            if phone_auth and wechat_auth:
-                if phone_auth.id == wechat_auth.id:
-                    # 同一个账号，直接返回用户信息
-                    user = Users.get_user_by_id(phone_auth.id)
-                    return {
-                        "action": "same_account",
-                        "can_proceed": True,
-                        "user": user,
-                        "message": "手机号和微信已绑定到同一账号",
-                    }
-                else:
-                    return {
-                        "action": "conflict",
-                        "can_proceed": False,
-                        "merged": False,
-                        "user": None,
-                        "message": "手机号和微信已被不同账号绑定",
-                    }
-
-            return {
-                "action": "unknown",
-                "can_proceed": False,
-                "merged": False,
-                "user": None,
-                "message": "未知状态",
-            }
 
         except Exception as e:
             return {
@@ -684,17 +840,28 @@ class AuthsTable:
                 "message": f"检查绑定关系时出错: {str(e)}",
             }
 
-    def get_auth_by_id(self, user_id: str) -> Optional[AuthModel]:
-        """根据用户ID获取认证信息"""
-        try:
-            with get_db() as db:
-                auth = db.query(Auth).filter_by(id=user_id, active=True).first()
-                log.info(f"get_auth_by_id: {auth}")
-                if auth:
-                    return AuthModel.model_validate(auth)
-                return None
-        except Exception:
-            return None
+    def check_binding_availability(self, login_type: str, login_value: str) -> bool:
+        """检查绑定信息是否可用（未被其他用户使用）"""
+        validation = self.validate_binding_constraints(
+            phone_number=login_value if login_type == "phone" else None,
+            wechat_openid=login_value if login_type == "wechat" else None,
+        )
+        return validation["valid"]
+
+    def try_merge_accounts(
+        self,
+        phone_number: str,
+        wechat_openid: str,
+        wechat_nickname: Optional[str] = None,
+        auth_metadata: Optional[dict] = None,
+    ) -> dict:
+        """尝试合并账号（兼容性方法）"""
+        return self.check_and_merge_wechat_phone_binding(
+            phone_number=phone_number,
+            wechat_openid=wechat_openid,
+            wechat_nickname=wechat_nickname,
+            auth_metadata=auth_metadata,
+        )
 
 
 class UserBindingsTable:
