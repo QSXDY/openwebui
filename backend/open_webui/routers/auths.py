@@ -1492,136 +1492,198 @@ async def wechat_follow_login(
 
 @router.post("/wechat/follow-event")
 async def wechat_follow_event(request: Request):
-    """处理微信公众号关注事件（微信服务器回调）"""
-    try:
-        # 从URL查询参数获取签名信息
-        signature = request.query_params.get("signature", "")
-        msg_signature = request.query_params.get("msg_signature", "")
-        timestamp = request.query_params.get("timestamp", "")
-        nonce = request.query_params.get("nonce", "")
+    """处理微信公众号关注事件（微信服务器回调）- 优化版本"""
+    # 记录开始时间
+    start_time = time.time()
 
+    # 立即返回success，避免超时
+    import asyncio
+
+    try:
+        # 更新统计信息
+        _wechat_callback_stats["total_requests"] += 1
+
+        # 快速获取原始数据
         body = await request.body()
+        query_params = dict(request.query_params)
+
+        # 异步处理事件，不阻塞响应
+        asyncio.create_task(
+            _process_wechat_event_async(request, body, query_params, start_time)
+        )
+
+    except Exception as e:
+        # 即使出错也要返回success，避免微信重复推送
+        _wechat_callback_stats["error_requests"] += 1
+        _wechat_callback_stats["last_error"] = str(e)
+        log.error(f"微信回调接收失败: {str(e)}")
+
+    # 立即返回成功响应（微信要求5秒内返回）
+    return Response(content="success", media_type="text/plain")
+
+
+async def _process_wechat_event_async(
+    request: Request, body: bytes, query_params: dict, start_time: float
+):
+    """异步处理微信事件，避免阻塞主响应"""
+    try:
+        # 解析参数
+        signature = query_params.get("signature", "")
+        msg_signature = query_params.get("msg_signature", "")
+        timestamp = query_params.get("timestamp", "")
+        nonce = query_params.get("nonce", "")
+
         xml_data = body.decode("utf-8")
 
-        log.info(f"收到微信事件回调:")
-        log.info(f"  - signature: {signature}")
-        log.info(f"  - msg_signature: {msg_signature}")
-        log.info(f"  - timestamp: {timestamp}")
-        log.info(f"  - nonce: {nonce}")
-        log.info(f"  - xml_data: {xml_data}")
+        # 简化日志记录
+        log.info(f"处理微信事件 - timestamp: {timestamp}")
 
+        # 快速解析XML
         root = ET.fromstring(xml_data)
 
-        # 首先尝试从明文部分获取信息（兼容模式下明文可用）
-        msg_type = root.find("MsgType").text if root.find("MsgType") is not None else ""
-
-        if msg_type:
-            # 明文模式或兼容模式下的明文部分可用
-            log.info("检测到明文消息，直接解析...")
-        else:
-            # 检查是否是纯加密消息
-            encrypted_element = root.find("Encrypt")
-
-            if encrypted_element is not None and encrypted_element.text:
-                # 处理纯加密消息
-                log.info("检测到纯加密消息，开始解密...")
-                encrypted_message = encrypted_element.text
-
-                # 解密消息
+        # 处理加密消息
+        encrypted_element = root.find("Encrypt")
+        if encrypted_element is not None and encrypted_element.text:
+            try:
                 decrypted_xml = WeChatFollowService.decrypt_message(
-                    request, encrypted_message, msg_signature, timestamp, nonce
+                    request, encrypted_element.text, msg_signature, timestamp, nonce
                 )
-
-                log.info(f"解密后的XML: {decrypted_xml}")
-
-                # 解析解密后的XML
                 root = ET.fromstring(decrypted_xml)
-            else:
-                log.error("无法识别的消息格式")
-                return Response(content="success", media_type="text/plain")
+            except Exception as e:
+                log.error(f"消息解密失败: {str(e)}")
+                _wechat_callback_stats["error_requests"] += 1
+                _wechat_callback_stats["last_error"] = f"解密失败: {str(e)}"
+                return
 
-        # 提取关键信息（如果之前没有提取过msg_type则重新提取）
-        if not msg_type:
-            msg_type = (
-                root.find("MsgType").text if root.find("MsgType") is not None else ""
+        # 提取事件信息
+        msg_type = _safe_get_xml_text(root, "MsgType")
+        event = _safe_get_xml_text(root, "Event")
+        openid = _safe_get_xml_text(root, "FromUserName")
+        scene_str = _safe_get_xml_text(root, "EventKey")
+        content = _safe_get_xml_text(root, "Content")  # 获取文本消息内容
+
+        # 统计事件类型
+        event_key = f"{msg_type}_{event}" if event else msg_type
+        _wechat_callback_stats["events_by_type"][event_key] = (
+            _wechat_callback_stats["events_by_type"].get(event_key, 0) + 1
+        )
+
+        # 记录关键事件信息
+        if msg_type == "event":
+            log.info(
+                f"微信事件: {event} - 用户: {openid[-8:] if openid else 'unknown'}"
+            )
+        elif msg_type == "text":
+            log.info(f"收到文本消息: {content[:30] if content else 'empty'}...")
+
+        # 快速处理业务逻辑
+        await _handle_wechat_event_fast(
+            request, msg_type, event, openid, scene_str, content
+        )
+
+        # 更新成功统计
+        _wechat_callback_stats["success_requests"] += 1
+        _wechat_callback_stats["last_success_time"] = time.time()
+
+        # 更新平均处理时间
+        process_time = (time.time() - start_time) * 1000  # 转换为毫秒
+        if _wechat_callback_stats["avg_process_time"] == 0:
+            _wechat_callback_stats["avg_process_time"] = process_time
+        else:
+            # 使用滑动平均
+            _wechat_callback_stats["avg_process_time"] = (
+                _wechat_callback_stats["avg_process_time"] * 0.8 + process_time * 0.2
             )
 
-        event = root.find("Event").text if root.find("Event") is not None else ""
-        openid = (
-            root.find("FromUserName").text
-            if root.find("FromUserName") is not None
-            else ""
-        )
-        scene_str = (
-            root.find("EventKey").text if root.find("EventKey") is not None else ""
-        )
+    except Exception as e:
+        _wechat_callback_stats["error_requests"] += 1
+        _wechat_callback_stats["last_error"] = str(e)
+        log.error(f"异步处理微信事件失败: {str(e)}")
 
-        log.info(f"解析出的事件信息:")
-        log.info(f"  - MsgType: {msg_type}")
-        log.info(f"  - Event: {event}")
-        log.info(f"  - FromUserName (openid): {openid}")
-        log.info(f"  - EventKey: {scene_str}")
+
+def _safe_get_xml_text(root, tag_name: str) -> str:
+    """安全获取XML标签文本内容"""
+    try:
+        element = root.find(tag_name)
+        return element.text if element is not None and element.text else ""
+    except:
+        return ""
+
+
+async def _handle_wechat_event_fast(
+    request: Request,
+    msg_type: str,
+    event: str,
+    openid: str,
+    scene_str: str,
+    content: str = "",
+):
+    """快速处理微信事件业务逻辑"""
+    try:
+        if not openid:
+            log.warning("收到无效的微信事件：缺少openid")
+            return
 
         # 处理关注事件
         if msg_type == "event" and event == "subscribe":
             if scene_str.startswith("qrscene_"):
                 scene_id = scene_str[8:]  # 去掉qrscene_前缀
                 WeChatFollowService.mark_followed(scene_id, openid)
-                log.info(f"用户 {openid} 通过场景值 {scene_id} 关注了公众号")
-                log.info(f"已标记场景值 {scene_id} 为已关注状态")
-
-                # 发送欢迎消息
-                try:
-                    await WeChatFollowService.send_welcome_message(request, openid)
-                except Exception as e:
-                    log.error(f"发送欢迎消息失败: {str(e)}")
+                log.info(f"新用户关注 - 场景: {scene_id}")
             else:
-                log.info(f"用户 {openid} 关注了公众号（无场景值）")
+                log.info(f"新用户关注 - 普通关注")
 
-                # 发送欢迎消息
-                try:
-                    await WeChatFollowService.send_welcome_message(request, openid)
-                except Exception as e:
-                    log.error(f"发送欢迎消息失败: {str(e)}")
+            # 异步发送欢迎消息
+            asyncio.create_task(_send_welcome_message_safe(request, openid))
 
-        # 处理扫描事件（已关注用户扫描带参数二维码）
+        # 处理扫描事件（已关注用户扫码）
         elif msg_type == "event" and event == "SCAN":
-            scene_id = scene_str
-            WeChatFollowService.mark_followed(scene_id, openid)
-            log.info(f"已关注用户 {openid} 扫描了场景值 {scene_id} 的二维码")
-            log.info(f"已标记场景值 {scene_id} 为已关注状态")
+            if scene_str:
+                WeChatFollowService.mark_followed(scene_str, openid)
+                log.info(f"用户扫码 - 场景: {scene_str}")
 
-            # 发送欢迎消息（SCAN事件也应该发送）
-            try:
-                await WeChatFollowService.send_welcome_message(request, openid)
-                log.info(f"成功发送欢迎消息给已关注用户 {openid}")
-            except Exception as e:
-                log.error(f"发送欢迎消息失败: {str(e)}")
+                # 异步发送欢迎消息
+                asyncio.create_task(_send_welcome_message_safe(request, openid))
 
         # 处理文本消息
         elif msg_type == "text":
-            content = (
-                root.find("Content").text if root.find("Content") is not None else ""
-            )
-            log.info(f"收到用户 {openid} 的文本消息: {content}")
-
-            # 处理用户消息并自动回复
-            try:
-                await WeChatFollowService.handle_user_message(request, openid, content)
-            except Exception as e:
-                log.error(f"处理用户消息失败: {str(e)}")
+            if content:
+                log.info(f"处理文本消息: {content[:30]}...")
+                # 异步处理消息回复
+                asyncio.create_task(_handle_user_message_safe(request, openid, content))
+            else:
+                log.warning("收到空的文本消息")
 
         else:
-            log.info(f"收到其他类型的事件: MsgType={msg_type}, Event={event}")
-
-        return Response(content="success", media_type="text/plain")
+            log.info(f"其他事件类型: {msg_type}/{event}")
 
     except Exception as e:
-        log.error(f"处理微信关注事件失败: {str(e)}")
-        import traceback
+        log.error(f"事件处理失败: {str(e)}")
 
-        log.error(f"错误详情: {traceback.format_exc()}")
-        return Response(content="success", media_type="text/plain")
+
+async def _send_welcome_message_safe(request: Request, openid: str):
+    """安全发送欢迎消息，不影响主流程"""
+    try:
+        if not request.app.state.config.WECHAT_WELCOME_ENABLED:
+            return
+
+        success = await WeChatFollowService.send_welcome_message(request, openid)
+        if success:
+            log.info(f"欢迎消息发送成功: {openid[-8:]}")
+        else:
+            log.warning(f"欢迎消息发送失败: {openid[-8:]}")
+
+    except Exception as e:
+        log.error(f"发送欢迎消息异常: {str(e)}")
+
+
+async def _handle_user_message_safe(request: Request, openid: str, content: str):
+    """安全处理用户消息，不影响主流程"""
+    try:
+        await WeChatFollowService.handle_user_message(request, openid, content)
+        log.info(f"用户消息处理完成: {openid[-8:]}")
+    except Exception as e:
+        log.error(f"处理用户消息异常: {str(e)}")
 
 
 @router.get("/wechat/follow-event")
@@ -4028,3 +4090,84 @@ async def test_wechat_token(request: Request, user=Depends(get_admin_user)):
                 "使用 /api/v1/auths/wechat/debug/network 接口获取更多诊断信息",
             ],
         }
+
+
+# 微信回调性能监控
+_wechat_callback_stats = {
+    "total_requests": 0,
+    "success_requests": 0,
+    "error_requests": 0,
+    "avg_process_time": 0,
+    "last_error": None,
+    "last_success_time": 0,
+    "events_by_type": {},
+}
+
+
+@router.get("/wechat/debug/callback-stats")
+async def get_wechat_callback_stats(request: Request, user=Depends(get_admin_user)):
+    """获取微信回调处理统计信息（仅管理员）"""
+    try:
+        stats = _wechat_callback_stats.copy()
+
+        # 计算成功率
+        if stats["total_requests"] > 0:
+            stats["success_rate"] = round(
+                (stats["success_requests"] / stats["total_requests"]) * 100, 2
+            )
+        else:
+            stats["success_rate"] = 0
+
+        # 格式化时间
+        if stats["last_success_time"]:
+            stats["last_success_time_formatted"] = datetime.datetime.fromtimestamp(
+                stats["last_success_time"]
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            stats["last_success_time_formatted"] = "从未成功"
+
+        # 添加建议
+        recommendations = []
+        if stats["success_rate"] < 95:
+            recommendations.append("成功率偏低，请检查服务器性能和网络连接")
+        if stats["avg_process_time"] > 3000:  # 3秒
+            recommendations.append("平均处理时间过长，可能影响微信回调")
+        if stats["error_requests"] > 10:
+            recommendations.append("错误次数较多，请检查日志")
+
+        stats["recommendations"] = recommendations
+
+        return {
+            "status": "success",
+            "stats": stats,
+            "explanation": {
+                "total_requests": "收到的回调总数",
+                "success_requests": "成功处理的回调数",
+                "error_requests": "处理失败的回调数",
+                "success_rate": "成功处理率 (%)",
+                "avg_process_time": "平均处理时间 (毫秒)",
+                "events_by_type": "各事件类型的统计",
+            },
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/wechat/debug/clear-callback-stats")
+async def clear_wechat_callback_stats(request: Request, user=Depends(get_admin_user)):
+    """清除微信回调统计信息（仅管理员）"""
+    try:
+        global _wechat_callback_stats
+        _wechat_callback_stats = {
+            "total_requests": 0,
+            "success_requests": 0,
+            "error_requests": 0,
+            "avg_process_time": 0,
+            "last_error": None,
+            "last_success_time": 0,
+            "events_by_type": {},
+        }
+        return {"status": "success", "message": "回调统计信息已清除"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
