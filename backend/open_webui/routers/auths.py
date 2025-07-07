@@ -648,7 +648,7 @@ class WeChatFollowService:
         # 获取新的access_token
         log.info("获取新的access_token")
         token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
-
+        log.info(f"token_url: {token_url}")
         try:
             async with ClientSession() as session:
                 async with session.get(token_url) as response:
@@ -658,11 +658,19 @@ class WeChatFollowService:
                     if "access_token" not in token_data:
                         error_msg = token_data.get("errmsg", "未知错误")
                         error_code = token_data.get("errcode", "unknown")
+
+                        # 提供详细的错误解释和解决方案
+                        detailed_error = WeChatFollowService._get_detailed_error_info(
+                            error_code, error_msg
+                        )
+
                         log.error(
                             f"获取access_token失败: errcode={error_code}, errmsg={error_msg}"
                         )
+                        log.error(f"错误详解: {detailed_error}")
+
                         raise ValueError(
-                            f"获取access_token失败: {error_msg} (errcode: {error_code})"
+                            f"获取access_token失败: {error_msg} (errcode: {error_code})\n解决方案: {detailed_error}"
                         )
 
                     access_token = token_data["access_token"]
@@ -681,6 +689,78 @@ class WeChatFollowService:
             # 清空缓存，避免使用无效的token
             WeChatFollowService._access_token_cache = {"token": None, "expires_at": 0}
             raise
+
+    @staticmethod
+    def _get_detailed_error_info(error_code: str, error_msg: str) -> str:
+        """获取详细的错误信息和解决方案"""
+        error_solutions = {
+            "40164": {
+                "description": "IP地址不在白名单中",
+                "solution": "请在微信公众平台「开发-基本配置-IP白名单」中添加服务器IP地址。当前服务器可能的IP地址请联系运维确认。",
+            },
+            "40013": {
+                "description": "不合法的AppID",
+                "solution": "请检查WECHAT_APP_ID配置是否正确，确保与微信公众号的AppID一致。",
+            },
+            "40001": {
+                "description": "获取access_token时AppSecret错误，或者access_token无效",
+                "solution": "请检查WECHAT_APP_SECRET配置是否正确，确保与微信公众号的AppSecret一致。",
+            },
+            "40002": {
+                "description": "不合法的凭证类型",
+                "solution": "请确认使用的是正确的grant_type参数。",
+            },
+            "40003": {
+                "description": "不合法的OpenID",
+                "solution": "请检查OpenID格式是否正确。",
+            },
+            "40125": {
+                "description": "无效的AppSecret",
+                "solution": "AppSecret错误或无效，请重新生成并配置正确的AppSecret。",
+            },
+            "45009": {
+                "description": "接口调用超过限制",
+                "solution": "access_token调用频率限制，请减少调用频率。正常情况下access_token有效期为2小时。",
+            },
+            "50001": {
+                "description": "用户未授权该api",
+                "solution": "请确认公众号类型是否支持该接口，服务号和认证的订阅号才支持高级接口。",
+            },
+            "43002": {
+                "description": "需要POST请求",
+                "solution": "请确认请求方式是否正确。",
+            },
+            "44002": {
+                "description": "POST的数据包为空",
+                "solution": "请确认POST数据是否正确。",
+            },
+            "44004": {
+                "description": "多媒体文件为空",
+                "solution": "请确认上传的媒体文件是否有效。",
+            },
+            "45001": {
+                "description": "多媒体文件大小超过限制",
+                "solution": "请检查上传文件大小是否符合要求。",
+            },
+            "45015": {
+                "description": "回复时间超过限制",
+                "solution": "响应用户消息的时间窗口为48小时。",
+            },
+            "45047": {
+                "description": "客服接口下行条数超过上限",
+                "solution": "客服消息发送频率受限，请控制发送频率。",
+            },
+        }
+
+        error_info = error_solutions.get(
+            str(error_code),
+            {
+                "description": f"未知错误: {error_msg}",
+                "solution": "请查看微信公众平台开发文档或联系技术支持。",
+            },
+        )
+
+        return f"{error_info['description']} - {error_info['solution']}"
 
     @staticmethod
     async def get_access_token(request: Request) -> str:
@@ -3769,3 +3849,182 @@ async def batch_fix_data_consistency(admin_user=Depends(get_admin_user)):
     except Exception as e:
         log.error(f"批量修复数据一致性失败: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/wechat/debug/network")
+async def debug_wechat_network(request: Request, user=Depends(get_admin_user)):
+    """调试微信网络连接和IP信息（仅管理员）"""
+    import socket
+    import aiohttp
+
+    debug_info = {
+        "server_info": {},
+        "wechat_config": {},
+        "connectivity_test": {},
+        "recommendations": [],
+    }
+
+    try:
+        # 1. 获取服务器IP信息
+        try:
+            # 获取本地IP
+            local_ip = socket.gethostbyname(socket.gethostname())
+            debug_info["server_info"]["local_ip"] = local_ip
+
+            # 通过外部服务获取公网IP
+            external_ip_services = [
+                "https://api.ipify.org",
+                "https://ipv4.icanhazip.com",
+                "https://api.ip.sb/ip",
+            ]
+
+            async with ClientSession() as session:
+                for service in external_ip_services:
+                    try:
+                        async with session.get(service, timeout=5) as response:
+                            if response.status == 200:
+                                public_ip = (await response.text()).strip()
+                                debug_info["server_info"]["public_ip"] = public_ip
+                                break
+                    except Exception as e:
+                        continue
+
+        except Exception as e:
+            debug_info["server_info"]["error"] = str(e)
+
+        # 2. 检查微信配置
+        app_id = request.app.state.config.WECHAT_APP_ID
+        app_secret = request.app.state.config.WECHAT_APP_SECRET
+
+        debug_info["wechat_config"] = {
+            "app_id_configured": bool(app_id),
+            "app_secret_configured": bool(app_secret),
+            "app_id_format": len(app_id) if app_id else 0,
+            "app_secret_format": len(app_secret) if app_secret else 0,
+        }
+
+        # 3. 测试微信API连接
+        if app_id and app_secret:
+            try:
+                token_url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+
+                async with ClientSession() as session:
+                    async with session.get(token_url, timeout=10) as response:
+                        result = await response.json()
+                        debug_info["connectivity_test"] = {
+                            "status_code": response.status,
+                            "response_data": result,
+                            "success": "access_token" in result,
+                            "error_code": result.get("errcode"),
+                            "error_message": result.get("errmsg"),
+                        }
+
+                        # 分析错误并提供建议
+                        if result.get("errcode"):
+                            error_code = str(result.get("errcode"))
+                            if error_code == "40164":
+                                debug_info["recommendations"].extend(
+                                    [
+                                        f"需要将服务器IP地址添加到微信公众号白名单",
+                                        f"当前服务器公网IP: {debug_info['server_info'].get('public_ip', '未获取到')}",
+                                        "请登录微信公众平台 -> 开发 -> 基本配置 -> IP白名单，添加此IP地址",
+                                        "注意：如果是云服务器，请确认使用的是弹性公网IP地址",
+                                    ]
+                                )
+                            elif error_code == "40013":
+                                debug_info["recommendations"].append(
+                                    "AppID配置错误，请检查WECHAT_APP_ID设置"
+                                )
+                            elif error_code == "40001":
+                                debug_info["recommendations"].append(
+                                    "AppSecret配置错误，请检查WECHAT_APP_SECRET设置"
+                                )
+
+            except Exception as e:
+                debug_info["connectivity_test"] = {"error": str(e), "success": False}
+                debug_info["recommendations"].append(
+                    "网络连接失败，请检查服务器网络配置"
+                )
+        else:
+            debug_info["connectivity_test"] = {
+                "error": "微信配置不完整",
+                "success": False,
+            }
+            debug_info["recommendations"].append(
+                "请先配置WECHAT_APP_ID和WECHAT_APP_SECRET"
+            )
+
+        # 4. 通用建议
+        if not debug_info["recommendations"]:
+            debug_info["recommendations"].append(
+                "配置看起来正常，如仍有问题请检查防火墙设置"
+            )
+
+        return {
+            "status": "success",
+            "debug_info": debug_info,
+            "instructions": {
+                "ip_whitelist_steps": [
+                    "1. 登录微信公众平台 (mp.weixin.qq.com)",
+                    "2. 进入「开发」->「基本配置」",
+                    "3. 找到「IP白名单」设置",
+                    f"4. 添加服务器IP: {debug_info['server_info'].get('public_ip', '请手动确认')}",
+                    "5. 保存设置并等待生效（通常立即生效）",
+                ],
+                "config_check_steps": [
+                    "1. 确认AppID和AppSecret配置正确",
+                    "2. 确认公众号类型支持相关接口",
+                    "3. 检查服务器网络是否正常",
+                    "4. 确认没有防火墙阻止访问微信API",
+                ],
+            },
+        }
+
+    except Exception as e:
+        log.error(f"微信网络调试失败: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "recommendations": [
+                "请检查服务器网络连接",
+                "确认微信公众号配置正确",
+                "联系系统管理员检查防火墙设置",
+            ],
+        }
+
+
+@router.post("/wechat/debug/test-token")
+async def test_wechat_token(request: Request, user=Depends(get_admin_user)):
+    """测试微信access_token获取（仅管理员）"""
+    try:
+        # 清除缓存，强制重新获取
+        WeChatFollowService._access_token_cache = {"token": None, "expires_at": 0}
+
+        # 尝试获取access_token
+        access_token = await WeChatFollowService.get_access_token(request)
+
+        return {
+            "status": "success",
+            "message": "access_token获取成功",
+            "token_info": {
+                "token_length": len(access_token),
+                "token_preview": (
+                    f"{access_token[:10]}..."
+                    if len(access_token) > 10
+                    else access_token
+                ),
+                "cache_expires_at": WeChatFollowService._access_token_cache.get(
+                    "expires_at", 0
+                ),
+            },
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "recommendations": [
+                "请查看详细错误信息进行相应调整",
+                "使用 /api/v1/auths/wechat/debug/network 接口获取更多诊断信息",
+            ],
+        }
