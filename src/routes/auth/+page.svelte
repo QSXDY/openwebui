@@ -44,6 +44,7 @@
 	let phonecode = '';
 	let password = '';
 	let login = 'wechat';
+	let logins = 'wechat';
 	let logintetxt = false;
 	let ldapUsername = '';
 	let codetext = '发送验证码';
@@ -201,7 +202,7 @@
 				};
 				showWeChatBindingModal = true;
 				toast.success('手机号验证成功，请扫描微信二维码完成注册');
-
+				logins = 'wechat';
 				// 获取微信二维码用于绑定
 				await getWeChatQRForBinding();
 			} else {
@@ -331,6 +332,8 @@
 	// 获取微信公众号关注二维码
 	const getWeChatQR = async () => {
 		try {
+			wechatQRCode = '';
+			wechatSceneId = '';
 			const response = await getWeChatQRCode();
 			if (response) {
 				wechatQRCode = response.qr_code;
@@ -355,6 +358,8 @@
 	// 新增：获取微信二维码用于绑定
 	const getWeChatQRForBinding = async () => {
 		try {
+			wechatQRCode = '';
+			wechatSceneId = '';
 			const response = await getWeChatQRCode();
 			if (response) {
 				wechatQRCode = response.qr_code;
@@ -440,6 +445,11 @@
 		wechatPolling = true;
 		wechatPollingInterval = setInterval(async () => {
 			try {
+				if (logins !== 'wechat') {
+					console.error('微信关注状态检查失败:', '请先选择微信登录方式');
+					stopWeChatPolling();
+					return;
+				}
 				const response = await checkWeChatFollowStatus(wechatSceneId);
 				if (response && response.status === 'followed' && response.openid) {
 					stopWeChatPolling();
@@ -696,7 +706,7 @@
 							>
 								{#if mode === 'signin'}
 									<button
-										on:click={() => (login = 'wechat')}
+										on:click={() => ((login = 'wechat'), (logins = 'wechat'))}
 										class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'wechat'
 											? ''
 											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
@@ -714,7 +724,7 @@
 									</button>
 								{/if}
 								<button
-									on:click={() => (login = 'phone')}
+									on:click={() => ((login = 'phone'), (logins = 'phone'))}
 									class="min-w-fit rounded-full p-1.5 pl-0 pb-0 {login == 'phone'
 										? ''
 										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
@@ -984,6 +994,7 @@
 														if (mode === 'signin') {
 															mode = 'signup';
 															login = 'phone';
+															logins = 'phone';
 														} else {
 															mode = 'signin';
 														}
