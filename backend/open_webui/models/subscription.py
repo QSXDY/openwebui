@@ -184,7 +184,7 @@ class PaymentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     user_id: str
-    user_name: Optional[str] = None 
+    user_name: Optional[str] = None
     amount: float
     payment_type: str  # subscription, credits
     plan_id: Optional[str] = None  # 如果是订阅支付，关联的套餐ID
@@ -1230,25 +1230,24 @@ class PaymentsTable:
         except Exception:
             return None
 
-
     def get_payments_user(self, page: int = 1, limit: int = 10) -> Dict[str, Any]:
         """获取所有支付记录，支持分页和排序"""
         if page < 1 or limit < 1 or limit > 100:  # 添加参数验证
             raise ValueError("Invalid pagination parameters")
-            
+
         try:
             with get_db() as db:
                 # 使用更高效的计数方式
                 total = db.query(Payment).count()
                 payments = (
-                db.query(Payment, User)
-                .join(User, Payment.user_id == User.id)
-                .order_by(Payment.created_at.desc())
-                .offset((page - 1) * limit)
-                .limit(limit)
-                .all()
-            )
-            
+                    db.query(Payment, User)
+                    .join(User, Payment.user_id == User.id)
+                    .order_by(Payment.created_at.desc())
+                    .offset((page - 1) * limit)
+                    .limit(limit)
+                    .all()
+                )
+
             payment_list = []
             for payment, user in payments:
                 payment_data = PaymentModel.model_validate(payment)
@@ -1264,8 +1263,6 @@ class PaymentsTable:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-
-
 
     def update_payment_status(
         self, payment_id: str, status: str, transaction_id: Optional[str] = None
