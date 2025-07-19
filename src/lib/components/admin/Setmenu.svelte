@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import Leaderboard from './Setmenu/thaliboard.svelte';
 	import Feedbacks from './Setmenu/exchangeboard.svelte';
+	import NameFeedbacks from './Setmenu/namefeedbackboard.svelte';
 
 	import { getAllFeedbacks } from '$lib/apis/evaluations';
 
@@ -112,6 +113,45 @@
 				</div>
 				<div class=" self-center">{$i18n.t('exchangeboard')}</div>
 			</button>
+			<button
+				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+				'namefeedbacks'
+					? ''
+					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+				on:click={() => {
+					selectedTab = 'namefeedbacks';
+				}}
+			>
+				<div class=" self-center mr-2">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="currentColor"
+						class="size-4"
+						viewBox="0 0 24 24"
+						><path
+							fill="none"
+							stroke="currentColor"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M18 12v5c0 1.657-2.686 3-6 3s-6-1.343-6-3v-5m12 0V7m0 5c0 1.657-2.686 3-6 3s-6-1.343-6-3m12-5c0-1.657-2.686-3-6-3S6 5.343 6 7m12 0c0 1.657-2.686 3-6 3S6 8.657 6 7m0 5V7"
+						/></svg
+					>
+					<!-- <svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 16 16"
+						fill="currentColor"
+						class="size-4"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M5.25 2A2.25 2.25 0 0 0 3 4.25v9a.75.75 0 0 0 1.183.613l1.692-1.195 1.692 1.195a.75.75 0 0 0 .866 0l1.692-1.195 1.693 1.195A.75.75 0 0 0 13 13.25v-9A2.25 2.25 0 0 0 10.75 2h-5.5Zm3.03 3.28a.75.75 0 0 0-1.06-1.06L4.97 6.47a.75.75 0 0 0 0 1.06l2.25 2.25a.75.75 0 0 0 1.06-1.06l-.97-.97h1.315c.76 0 1.375.616 1.375 1.375a.75.75 0 0 0 1.5 0A2.875 2.875 0 0 0 8.625 6.25H7.311l.97-.97Z"
+							clip-rule="evenodd"
+						/>
+					</svg> -->
+				</div>
+				<div class=" self-center">支付订单列表</div>
+			</button>
 		</div>
 
 		<div class="flex-1 mt-1 lg:mt-0 overflow-y-scroll">
@@ -119,6 +159,8 @@
 				<Leaderboard {feedbacks} />
 			{:else if selectedTab === 'feedbacks'}
 				<Feedbacks {feedbacks} />
+			{:else if selectedTab === 'namefeedbacks'}
+				<NameFeedbacks {feedbacks} />
 			{/if}
 		</div>
 	</div>

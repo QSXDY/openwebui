@@ -27,6 +27,43 @@ export const getAdminDetails = async (token: string) => {
 	return res;
 };
 
+export const paymentsUser = async (token: string = '', page: number, page_size: number) => {
+	let error = null;
+	const queryParams = new URLSearchParams();
+	queryParams.append('page', page.toString());
+	queryParams.append('limit', page_size.toString());
+
+	// 构建完整 URL
+	const url = `${WEBUI_API_BASE_URL}/subscription/payments/user?${queryParams.toString()}`;
+
+	const res = await fetch(url, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.then((json) => {
+			return json;
+		})
+		.catch((err) => {
+			error = err;
+			console.log(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getAdminConfig = async (token: string) => {
 	let error = null;
 

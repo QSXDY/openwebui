@@ -544,6 +544,20 @@ async def list_redeem_codes(
     return RedeemCodes.get_redeem_codes(page, limit)
 
 
+@router.get(
+    "/payments/user",
+    summary="获取用户支付列表",
+    description="分页获取用户支付列表（管理员权限）",
+)
+async def list_redeem_codes(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    _: UserModel = Depends(get_admin_user),
+):
+    """获取用户支付列表（分页）"""
+    return Payments.get_payments_user(page, limit)
+
+
 @router.post(
     "/redeem-codes", status_code=status.HTTP_201_CREATED, summary="批量生成兑换码"
 )
