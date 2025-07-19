@@ -1263,7 +1263,7 @@ class PaymentsTable:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            raise HTTPException(status_code=500, detail="Server internal error")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 
