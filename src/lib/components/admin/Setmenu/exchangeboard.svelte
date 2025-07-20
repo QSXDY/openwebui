@@ -102,12 +102,10 @@
 
 	const getUserList = async () => {
 		try {
-			const res = await getSubCodes(localStorage.token, query, orderBy, direction, page).catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const res = await getSubCodes(localStorage.token, page).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
 			if (res) {
 				console.log('兑换码', res);

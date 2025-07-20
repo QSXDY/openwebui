@@ -470,10 +470,10 @@ export const subCodes = async (
 };
 
 // 获取兑换码
-export const getSubCodes = async (token: string = '') => {
+export const getSubCodes = async (token: string = '', page: number = 1) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/subscription/redeem-codes`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/subscription/redeem-codes?page=${page}&limit=30`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
