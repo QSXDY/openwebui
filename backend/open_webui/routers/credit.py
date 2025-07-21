@@ -102,7 +102,8 @@ async def ticket_callback(request: Request) -> str:
     统一的支付回调处理函数
     """
 
-    callback_data = request.query_params
+    # 将不可变的QueryParams转换为可变字典
+    callback_data = dict(request.query_params)
     if not ezfp_client.verify(callback_data):
         return "invalid signature"
 
@@ -165,7 +166,7 @@ async def ticket_callback(request: Request) -> str:
             "status": "active",
         }
         Subscriptions.subscribe_user(subscription)
-    return {"success"}
+    return "success"
 
 
 @router.get("/callback/redirect", response_class=RedirectResponse)

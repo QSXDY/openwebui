@@ -104,7 +104,13 @@
 	import MenuLines from '$lib/components/icons/MenuLines.svelte';
 </script>
 
-<ConfirmDialog bind:show={showDeleteConfirmDialog} menu={frmoMenu} on:confirm={() => {}} />
+<ConfirmDialog
+	bind:show={showDeleteConfirmDialog}
+	menu={frmoMenu}
+	on:confirm={() => {
+		menuList();
+	}}
+/>
 <AdminDialog bind:show={showAdminDialog} on:confirm={() => {}} />
 <PaymentDialog
 	bind:show={showPaymentDialog}

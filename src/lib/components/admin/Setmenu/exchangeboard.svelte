@@ -464,7 +464,7 @@
 						<td class=" px-3 py-1"> {user.code} </td>
 
 						<td class=" px-3 py-1">
-							{menus.find((menu) => menu.id === user.plan_id)?.name}
+							{menus.find((menu) => menu.id === user.plan_id)?.name ?? '停用套餐'}
 						</td>
 
 						<td class=" px-3 py-1">

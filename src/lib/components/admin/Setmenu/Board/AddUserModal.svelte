@@ -23,7 +23,7 @@
 			});
 
 			if (res) {
-				menulist = res.plans ?? [];
+				menulist = res.plans?.filter((plan) => plan.is_active) ?? [];
 			}
 		} catch (err) {
 			console.error(err);

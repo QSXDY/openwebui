@@ -62,41 +62,41 @@ async def create_payment(
                 "detail": payment_detail,
             }
         )
-        # 查找支付记录
-        payment = Payments.get_payment(out_trade_no)
-        # 已经处理过的回调
-        if payment.status != "pending":
-            return "success"
-
-        # 更新支付状态
-        payment.status = "completed"
-        payment.transaction_id = user.id
-        payment.updated_at = int(datetime.datetime.now().timestamp())
-        Payments.update_payment(payment.id, payment)
-
-        # 根据支付类型处理后续逻辑
-
-        if payment.payment_type == "subscription":
-            # 处理套餐订阅
-            # 处理套餐订阅
-            plan = Plans.get_plan_by_id(payment.plan_id)
-            if not plan:
-                log.error(f"找不到套餐: {payment.plan_id}")
-                return "success"
-            now = int(datetime.datetime.now().timestamp())
-            subscription_id = str(uuid.uuid4())
-            subscription = {
-                "id": subscription_id,
-                "user_id": payment.user_id,
-                "plan_id": payment.plan_id,
-                "start_date": now,
-                "end_date": now + (plan.duration * 86400),
-                "status": "active",
-            }
-            # Subscriptions.subscribe_user(subscription)
-            # 新订阅逻辑
-
     else:
         raise HTTPException(status_code=400, detail="不支持的支付类型")
 
     return {"id": out_trade_no, "amount": amount, "detail": payment_detail}
+
+    # 查找支付记录
+    payment = Payments.get_payment(out_trade_no)
+    # 已经处理过的回调
+    if payment.status != "pending":
+        return "success"
+
+    # 更新支付状态
+    payment.status = "completed"
+    payment.transaction_id = user.id
+    payment.updated_at = int(datetime.datetime.now().timestamp())
+    Payments.update_payment(payment.id, payment)
+    # 移除直接更新支付状态为completed的逻辑
+    # 根据支付类型处理后续逻辑
+
+    if payment.payment_type == "subscription":
+        # 处理套餐订阅
+        plan = Plans.get_plan_by_id(payment.plan_id)
+        if not plan:
+            log.error(f"找不到套餐: {payment.plan_id}")
+            # 移除返回"success"的逻辑
+        now = int(datetime.datetime.now().timestamp())
+        subscription_id = str(uuid.uuid4())
+        subscription = {
+            "id": subscription_id,
+            "user_id": payment.user_id,
+            "plan_id": payment.plan_id,
+            "start_date": now,
+            "end_date": now + (plan.duration * 86400),
+            "status": "active",
+        }
+        # 恢复订阅保存逻辑
+        Subscriptions.subscribe_user(subscription)
+        # 新订阅逻辑

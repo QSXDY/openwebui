@@ -111,7 +111,6 @@
 	});
 
 	const ashuda = async () => {
-		console.log('你好111111');
 		try {
 			const res = await SubscriptionPayments(localStorage.token, qrCodeUrl.trade_no).catch(
 				(error) => {
@@ -121,7 +120,14 @@
 			);
 
 			if (res) {
-				console.log('获取订购套餐详情', res.detail);
+				console.log('获取订购套餐详情', res);
+				if (res.data.status == 'completed') {
+					toast.success('支付成功');
+					show = false;
+					dispatch('confirm', '1231');
+				} else {
+					toast.info('支付中，请稍后...');
+				}
 			}
 		} catch (err) {
 			console.error(err);

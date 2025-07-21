@@ -200,7 +200,8 @@
 			config = res;
 		}
 
-		console.log('cred$user$user--it', $user);
+		// console.log('cred$user$user--it', $user);
+		credit = $user.credit == '0E-12' ? 0 : $user.credit;
 		tradeInfo = {};
 		document.getElementById('trade-qrcode').innerHTML = '';
 
@@ -216,7 +217,7 @@
 		});
 		tradeInfouse = sessionUser;
 		adcredit = sessionUser.admin_credit == null ? null : sessionUser.admin_credit;
-		console.log('企业积分', tradeInfouse);
+		// console.log('企业积分', tradeInfouse);
 	};
 
 	onMount(async () => {
