@@ -549,6 +549,14 @@
 	// 使用示例
 
 	onMount(async () => {
+		if (localStorage.getItem('token')) {
+			console.log('localStoragetoken存在');
+			localStorage.removeItem('token');
+		}
+		if (sessionStorage.getItem('token')) {
+			console.log('sessionStoragetoken存在');
+			sessionStorage.removeItem('token');
+		}
 		if ($user !== undefined) {
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);

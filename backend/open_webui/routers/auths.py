@@ -2062,12 +2062,12 @@ async def register_with_wechat_binding(
         # 生成6位随机字符 + 1位随机数字（共7位）
         random_string = f"{local_part}{secrets.choice(string.digits)}@email"
         # 更新用户email
-        user.email = random_string
+        final_user.email = random_string
 
         # 调用Auths和Users的更新方法，确保数据库提交
-        Auths.update_email_by_id(user.id, random_string)
+        Auths.update_email_by_id(final_user.id, random_string)
         updated_user = Users.update_user_by_id(
-            user.id,
+            final_user.id,
             {"email": random_string},
         )
         token = create_token(
