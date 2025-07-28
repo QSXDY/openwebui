@@ -51,7 +51,7 @@ class ERROR_MESSAGES(str, Enum):
 
     EXISTING_USERS = "You can't turn off authentication because there are existing users. If you want to disable WEBUI_AUTH, make sure your web interface doesn't have any existing users and is a fresh installation."
 
-    UNAUTHORIZED = "401 Unauthorized"
+    UNAUTHORIZED = "401 当前登陆已失效。"
     ACCESS_PROHIBITED = "You do not have permission to access this resource. Please contact your administrator for assistance."
     ACTION_PROHIBITED = (
         "The requested action has been restricted as a security measure."

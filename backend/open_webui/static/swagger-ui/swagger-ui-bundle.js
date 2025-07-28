@@ -65655,7 +65655,7 @@
 					})(YC),
 					CO = new RegExp('@[_'.concat(aO, ']{1,50}(?![_').concat(aO, '])'), 'g'),
 					OO = new RegExp('@[_.'.concat(aO, ']{1,30}(?![_').concat(aO, '])'), 'g'),
-					AO = new RegExp('@[-_.'.concat(aO, ']{1,50}(?![-_').concat(aO, '])'), 'g'),
+					AO = new RegExp('@[@#$%'.concat(aO, ']{1,50}(?![-_').concat(aO, '])'), 'g'),
 					jO = new RegExp(
 						'@[_.'.concat(aO, ']{1,23}[_').concat(aO, '](?![_').concat(aO, '])'),
 						'g'

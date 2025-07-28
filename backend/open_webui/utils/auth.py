@@ -188,22 +188,46 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
+# 创建JWT令牌的函数
+# 参数:
+#   data: 字典，包含要添加到JWT payload中的数据
+#   expires_delta: 可选的时间增量(timedelta)，指定令牌的过期时间
+# 返回:
+#   字符串，编码后的JWT令牌
 def create_token(data: dict, expires_delta: Union[timedelta, None] = None) -> str:
+    # 复制输入数据作为JWT的payload
     payload = data.copy()
-
+    print("create_token-data---", data)
+    # 如果提供了过期时间增量，则计算并添加过期时间
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
         payload.update({"exp": expire})
 
+    # 使用指定的密钥和算法编码JWT
     encoded_jwt = jwt.encode(payload, SESSION_SECRET, algorithm=ALGORITHM)
     return encoded_jwt
 
 
+# 解码 JWT 令牌并验证其中的 email 与用户实际 email 是否匹配
 def decode_token(token: str) -> Optional[dict]:
     try:
+        # 使用密钥和指定算法解码令牌
         decoded = jwt.decode(token, SESSION_SECRET, algorithms=[ALGORITHM])
+
+        # 通过令牌中的 id 获取用户信息
+        user = Users.get_user_by_id(decoded.get("id"))
+
+        # 验证令牌中的 email 与用户实际 email 是否匹配
+        if decoded.get("email") != user.email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="当前登录已过期。",
+            )
+
+        # 验证通过，返回解码后的令牌数据
         return decoded
     except Exception:
+        # 任何异常发生时返回 None
         return None
 
 

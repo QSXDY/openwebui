@@ -14,6 +14,8 @@ from io import BytesIO
 import base64
 import struct
 import xml.etree.ElementTree as ET
+import secrets
+import string
 
 try:
     from Crypto.Cipher import AES
@@ -1264,9 +1266,23 @@ async def sms_signin(request: Request, response: Response, form_data: SMSLoginFo
     expires_at = None
     if expires_delta:
         expires_at = int(time.time()) + int(expires_delta.total_seconds())
+    # 修改 user.email为随机数，防止用户恶意修改
+    allowed_chars = string.ascii_letters + string.digits + "._-+"
+    local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+    # 生成6位随机字符 + 1位随机数字（共7位）
+    random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+    # 更新用户email
+    user.email = random_string
+
+    # 调用Auths和Users的更新方法，确保数据库提交
+    Auths.update_email_by_id(user.id, random_string)
+    updated_user = Users.update_user_by_id(
+        user.id,
+        {"email": random_string},
+    )
 
     token = create_token(
-        data={"id": user.id},
+        data={"id": user.id, "email": random_string},
         expires_delta=expires_delta,
     )
 
@@ -1382,10 +1398,26 @@ async def wechat_follow_login(
             if update_data:
                 Users.update_user_by_id(user.id, update_data)
                 user = Users.get_user_by_id(user.id)  # 获取最新数据
+            # 修改 user.email为随机数，防止用户恶意修改
+            allowed_chars = string.ascii_letters + string.digits + "._-+"
+            local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+            # 生成6位随机字符 + 1位随机数字（共7位）
+            random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+            # 更新用户email
+            user.email = random_string
 
+            # 调用Auths和Users的更新方法，确保数据库提交
+            Auths.update_email_by_id(user.id, random_string)
+            updated_user = Users.update_user_by_id(
+                user.id,
+                {"email": random_string},
+            )
             # 生成JWT令牌
             expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-            token = create_token(data={"id": user.id}, expires_delta=expires_delta)
+            token = create_token(
+                data={"id": user.id, "email": random_string},
+                expires_delta=expires_delta,
+            )
 
             # 设置Cookie
             if expires_delta:
@@ -2024,9 +2056,25 @@ async def register_with_wechat_binding(
         expires_at = None
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
+        # 修改 user.email为随机数，防止用户恶意修改
+        allowed_chars = string.ascii_letters + string.digits + "._-+"
+        local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+        # 生成6位随机字符 + 1位随机数字（共7位）
+        random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+        # 更新用户email
+        user.email = random_string
 
+        # 调用Auths和Users的更新方法，确保数据库提交
+        Auths.update_email_by_id(user.id, random_string)
+        updated_user = Users.update_user_by_id(
+            user.id,
+            {"email": random_string},
+        )
         token = create_token(
-            data={"id": final_user.id},
+            data={
+                "id": final_user.id,
+                "email": random_string,
+            },
             expires_delta=expires_delta,
         )
 
@@ -2273,9 +2321,22 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
                 expires_at = None
                 if expires_delta:
                     expires_at = int(time.time()) + int(expires_delta.total_seconds())
+                # 修改 user.email为随机数，防止用户恶意修改
+                allowed_chars = string.ascii_letters + string.digits + "._-+"
+                local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+                # 生成6位随机字符 + 1位随机数字（共7位）
+                random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+                # 更新用户email
+                user.email = random_string
 
+                # 调用Auths和Users的更新方法，确保数据库提交
+                Auths.update_email_by_id(user.id, random_string)
+                updated_user = Users.update_user_by_id(
+                    user.id,
+                    {"email": random_string},
+                )
                 token = create_token(
-                    data={"id": user.id},
+                    data={"id": user.id, "email": random_string},
                     expires_delta=expires_delta,
                 )
 
@@ -2374,9 +2435,23 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
         expires_at = None
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
+        # 修改 user.email为随机数，防止用户恶意修改
+        allowed_chars = string.ascii_letters + string.digits + "._-+"
+        local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+        # 生成6位随机字符 + 1位随机数字（共7位）
+        random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+        # 更新用户email
+        user.email = random_string
 
+        # 调用Auths和Users的更新方法，确保数据库提交
+        Auths.update_email_by_id(user.id, random_string)
+        updated_user = Users.update_user_by_id(
+            user.id,
+            {"email": random_string},
+        )
+        # 创建新的token
         token = create_token(
-            data={"id": user.id},
+            data={"id": user.id, "email": random_string},
             expires_delta=expires_delta,
         )
 
@@ -2496,9 +2571,22 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             expires_at = None
             if expires_delta:
                 expires_at = int(time.time()) + int(expires_delta.total_seconds())
+            # 修改 user.email为随机数，防止用户恶意修改
+            allowed_chars = string.ascii_letters + string.digits + "._-+"
+            local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+            # 生成6位随机字符 + 1位随机数字（共7位）
+            random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+            # 更新用户email
+            user.email = random_string
 
+            # 调用Auths和Users的更新方法，确保数据库提交
+            Auths.update_email_by_id(user.id, random_string)
+            updated_user = Users.update_user_by_id(
+                user.id,
+                {"email": random_string},
+            )
             token = create_token(
-                data={"id": user.id},
+                data={"id": user.id, "email": random_string},
                 expires_delta=expires_delta,
             )
 
@@ -2635,7 +2723,7 @@ async def add_user(form_data: AddUserForm, user=Depends(get_admin_user)):
         )
 
         if user:
-            token = create_token(data={"id": user.id})
+            token = create_token(data={"id": user.id, "email": user.email})
             return {
                 "token": token,
                 "token_type": "Bearer",
@@ -3470,7 +3558,20 @@ async def wechat_bind_phone(
         expires_at = None
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
+        # 修改 user.email为随机数，防止用户恶意修改
+        allowed_chars = string.ascii_letters + string.digits + "._-+"
+        local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+        # 生成6位随机字符 + 1位随机数字（共7位）
+        random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+        # 更新用户email
+        user.email = random_string
 
+        # 调用Auths和Users的更新方法，确保数据库提交
+        Auths.update_email_by_id(user.id, random_string)
+        updated_user = Users.update_user_by_id(
+            user.id,
+            {"email": random_string},
+        )
         token = create_token(
             data={"id": final_user.id},
             expires_delta=expires_delta,

@@ -501,7 +501,7 @@ class OAuthManager:
                 )
 
         jwt_token = create_token(
-            data={"id": user.id},
+            data={"id": user.id, "email": user.email},
             expires_delta=parse_duration(auth_manager_config.JWT_EXPIRES_IN),
         )
 
