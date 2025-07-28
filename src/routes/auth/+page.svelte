@@ -571,7 +571,7 @@
 		if (remainingCookies) {
 			console.warn('删除失败，可能是HttpOnly类型Cookie或属性不匹配');
 		} else {
-			console.log('Cookie中的token已成功删除');
+			console.log('Cookie已成功删除');
 		}
 	}
 
