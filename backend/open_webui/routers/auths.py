@@ -1483,9 +1483,15 @@ async def wechat_follow_login(
             profile_image_url = (
                 f"https://www.gravatar.com/avatar/{avatar_hash}?d=identicon&s=200"
             )
+            # 修改 user.email为随机数，防止用户恶意修改
+            allowed_chars = string.ascii_letters + string.digits + "._-+"
+            local_part = "".join(secrets.choice(allowed_chars) for _ in range(6))
+            # 生成6位随机字符 + 1位随机数字（共7位）
+            random_string = f"{local_part}{secrets.choice(string.digits)}@email"
+            # 更新用户email
 
         user = Auths.insert_new_auth(
-            email=None,
+            email=random_string,
             password=str(uuid.uuid4()),  # 随机密码
             name=nickname,
             role="user",
@@ -1500,11 +1506,17 @@ async def wechat_follow_login(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="用户创建失败"
             )
-
+            # 生成JWT令牌
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        token = create_token(
+            data={"id": user.id, "email": random_string},
+            expires_delta=expires_delta,
+        )
         # 返回新用户信息（提示绑定手机号）
         return {
             "success": True,
             "need_phone_binding": True,
+            "token": token,
             "user": {
                 "id": user.id,
                 "name": user.name,

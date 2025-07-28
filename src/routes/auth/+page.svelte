@@ -547,16 +547,41 @@
 	}
 
 	// 使用示例
+	function deleteCookieToken() {
+		// 要删除的Cookie名称
+		const cookieName = 'token';
+
+		// 获取当前域名和路径（确保与原Cookie匹配）
+		const currentDomain = window.location.hostname;
+		const currentPath = '/'; // 默认为根路径，若原Cookie有特定路径需修改
+
+		// 构建删除指令：设置过期时间为过去，并匹配原Cookie的路径和域名
+		document.cookie =
+			`${cookieName}=; ` +
+			`expires=Thu, 01 Jan 1970 00:00:00 UTC; ` +
+			`path=${currentPath}; ` +
+			`domain=${currentDomain}; ` +
+			`SameSite=Lax;`; // 匹配常见的SameSite属性
+
+		// 验证删除结果
+		const remainingCookies = document.cookie
+			.split('; ')
+			.some((cookie) => cookie.startsWith(`${cookieName}=`));
+
+		if (remainingCookies) {
+			console.warn('删除失败，可能是HttpOnly类型Cookie或属性不匹配');
+		} else {
+			console.log('Cookie中的token已成功删除');
+		}
+	}
 
 	onMount(async () => {
 		if (localStorage.getItem('token')) {
 			console.log('localStoragetoken');
 			localStorage.removeItem('token');
 		}
-		if (sessionStorage.getItem('token')) {
-			console.log('sessionStoragetoken');
-			sessionStorage.removeItem('token');
-		}
+		// 执行删除操作
+		deleteCookieToken();
 		if ($user !== undefined) {
 			const redirectPath = querystringValue('redirect') || '/';
 			goto(redirectPath);
